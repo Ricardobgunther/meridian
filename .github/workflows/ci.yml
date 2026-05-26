@@ -11,20 +11,6 @@ jobs:
     name: Laravel (PHP)
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: testing
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
     steps:
       - uses: actions/checkout@v4
 
@@ -32,7 +18,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.3"
-          extensions: pdo, pdo_pgsql
+          extensions: pdo, pdo_sqlite, sqlite3, pdo_pgsql, mbstring, openssl, tokenizer, xml
           coverage: none
 
       - name: Install dependencies
@@ -54,13 +40,6 @@ jobs:
       - name: Run tests
         working-directory: ./backend
         run: php artisan test --env=testing
-        env:
-          DB_CONNECTION: pgsql
-          DB_HOST: localhost
-          DB_PORT: 5432
-          DB_DATABASE: testing
-          DB_USERNAME: postgres
-          DB_PASSWORD: postgres
 
   frontend:
     name: Next.js (TypeScript)
