@@ -1,0 +1,13 @@
+# Ajuste owners quando o time crescer.
+# Sintaxe: <padrao> <owner1> <owner2> ...
+# Owners são notificados e marcados como reviewers automaticamente em PRs.
+
+# Default — qualquer arquivo sem regra mais específica
+*               @ricardobg2004
+
+# Áreas
+/backend/       @ricardobg2004
+/frontend/      @ricardobg2004
+/.ai/           @ricardobg2004
+/.claude/       @ricardobg2004
+/.github/       @ricardobg2004
