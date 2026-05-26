@@ -37,9 +37,21 @@ jobs:
         working-directory: ./backend
         run: vendor/bin/phpstan analyse --memory-limit=512M
 
+      - name: Debug environment
+        working-directory: ./backend
+        run: |
+          echo "--- PHP version ---"
+          php -v
+          echo "--- PHP loaded extensions (filtered) ---"
+          php -m | grep -iE "pdo|sqlite|openssl|mbstring|tokenizer|xml|json|hash" | sort
+          echo "--- .env.testing (DB/APP keys) ---"
+          grep -E "^(APP_KEY|APP_ENV|DB_|SESSION_|CACHE_|QUEUE_)" .env.testing | sed 's/APP_KEY=.*/APP_KEY=<redacted>/'
+          echo "--- pest version ---"
+          vendor/bin/pest --version || true
+
       - name: Run tests
         working-directory: ./backend
-        run: php artisan test --env=testing
+        run: vendor/bin/pest --colors=never
 
   frontend:
     name: Next.js (TypeScript)
