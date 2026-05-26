@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  backend:
+    name: Laravel (PHP)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: testing
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pdo, pdo_pgsql
+          coverage: none
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: composer install --prefer-dist --no-progress
+
+      - name: Copy .env
+        working-directory: ./backend
+        run: cp .env.example .env.testing
+
+      - name: Generate key
+        working-directory: ./backend
+        run: php artisan key:generate --env=testing
+
+      - name: Run Larastan
+        working-directory: ./backend
+        run: vendor/bin/phpstan analyse --memory-limit=512M
+
+      - name: Run tests
+        working-directory: ./backend
+        run: php artisan test --env=testing
+        env:
+          DB_CONNECTION: pgsql
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_DATABASE: testing
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+
+  frontend:
+    name: Next.js (TypeScript)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: ./frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Type check
+        working-directory: ./frontend
+        run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: ./frontend
+        run: npm run lint
+
+      - name: Build
+        working-directory: ./frontend
+        run: npm run build

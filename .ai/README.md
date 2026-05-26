@@ -34,39 +34,31 @@ Stack: Laravel · Next.js · Supabase · Tailwind · Docker
 
 ## Como Usar os Agentes
 
-### No Claude Code (terminal)
+Os agentes são **subagents reais do Claude Code**, definidos em `.claude/agents/`.
+Você **não precisa nomeá-los** — o Claude os aciona automaticamente conforme o
+domínio da tarefa. Os arquivos aqui em `.ai/agents/` são a **fonte da verdade**:
+cada subagent lê o `.ai/agents/<nome>.md` correspondente antes de agir.
 
-```bash
-# Iniciar sessão com agente específico
-claude
+### Fluxo automático
 
-# No prompt, identificar o agente e dar o contexto:
-"Você é o backend-agent. [descrição da tarefa]"
+A sessão principal do Claude Code atua como **orquestrador**:
+
+```
+1. Dividir   → quebra a tarefa por domínio (schema? API? UI? infra?)
+2. Delegar   → aciona o subagent de cada domínio na ordem de dependência
+               database-agent → backend-agent → frontend-agent
+               (uiux-agent antes de UI nova)
+3. Testar    → testing-agent cobre o que foi implementado
+4. Revisar   → review-agent SEMPRE ao final; BLOQUEIO volta para correção
 ```
 
-### Com prompts prontos
+Basta descrever a tarefa em linguagem natural. Para forçar um agente específico,
+peça explicitamente (ex.: "use o database-agent para revisar os índices").
 
-```bash
-# 1. Abrir o prompt relevante em .ai/prompts/
-# 2. Copiar e adaptar o template
-# 3. Colar no Claude Code com o agente identificado
-```
+### Prompts prontos
 
-### Combinando agentes
-
-```bash
-# Feature completa (sequencial):
-# 1. database-agent  → schema e migration
-# 2. backend-agent   → API endpoint
-# 3. frontend-agent  → componentes e página
-# 4. testing-agent   → testes
-# 5. review-agent    → revisão final
-
-# Review paralelo:
-"Você é o review-agent. Revisar segurança deste endpoint [código].
- Em seguida, atue como database-agent e verificar se os índices
- estão adequados para as queries usadas."
-```
+Os templates em `.ai/prompts/` continuam úteis como referência de estrutura —
+cole o conteúdo relevante no pedido quando quiser guiar uma tarefa específica.
 
 ---
 

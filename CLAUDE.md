@@ -6,10 +6,10 @@ Stack: **Laravel 11** (API) · **Next.js 14** (App Router) · **Supabase** (Post
 
 ## Sistema de Agentes
 
-Este projeto usa um sistema de agentes em `.ai/`. Antes de qualquer tarefa, identifique o agente correto:
+Este projeto usa **7 subagents do Claude Code** em `.claude/agents/`. Eles são acionados automaticamente — você não precisa nomeá-los. A sessão principal atua como **orquestrador**.
 
-| Agente | Domínio |
-|--------|---------|
+| Subagent | Domínio |
+|----------|---------|
 | `backend-agent` | Laravel, PHP, API REST |
 | `frontend-agent` | Next.js, React, TypeScript, Tailwind |
 | `database-agent` | PostgreSQL, Supabase, RLS, migrations |
@@ -18,12 +18,24 @@ Este projeto usa um sistema de agentes em `.ai/`. Antes de qualquer tarefa, iden
 | `testing-agent` | Pest, Vitest, Playwright |
 | `review-agent` | Segurança, performance, qualidade |
 
-Leia o arquivo do agente em `.ai/agents/<nome>.md` antes de agir no domínio dele.
+Cada subagent lê seu domínio detalhado em `.ai/agents/<nome>.md` e nas skills relevantes — o diretório `.ai/` continua sendo a **fonte da verdade**.
 
-**Separação obrigatória:**
+### Fluxo de orquestração (obrigatório)
+
+Como orquestrador, para qualquer tarefa não-trivial:
+
+1. **Dividir** — quebre a tarefa por domínio: schema? API? UI? infra?
+2. **Delegar** — acione o subagent de cada domínio na ordem natural de dependência: `database-agent` → `backend-agent` → `frontend-agent` (com `uiux-agent` antes de UI nova).
+3. **Testar** — acione o `testing-agent` para cobrir o que foi implementado.
+4. **Revisar** — acione SEMPRE o `review-agent` ao final. Achados `🚫 BLOQUEIO` voltam para o subagent de origem corrigir; repita até `APROVADO`.
+
+Tarefas de domínio único podem ir direto ao subagent correspondente, mas o passo de **review é sempre obrigatório** antes de concluir.
+
+**Separação obrigatória** (cada subagent já a aplica):
 - `backend-agent` → nunca toca `.tsx`
 - `frontend-agent` → nunca toca migrations ou `routes/api.php`
 - `database-agent` → nunca escreve lógica de negócio
+- `devops-agent` → nunca toca lógica de aplicação
 
 ---
 

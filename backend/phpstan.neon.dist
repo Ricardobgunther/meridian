@@ -1,0 +1,9 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    paths:
+        - app
+
+    # Nível 0-9. Comece em 5 e suba conforme o código amadurece.
+    level: 5
