@@ -2,26 +2,129 @@
 @tailwind components;
 @tailwind utilities;
 
+/**
+ * Semantic design tokens. See .ai/specs/multi-tenancy-ui/00-design-tokens.md
+ * for full rationale and contrast ratios.
+ *
+ * Tema escuro dirigido por data-theme="dark" no <html>. Fallback .dark mantido
+ * para compatibilidade com Tailwind ('class' variant).
+ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --surface: 0 0% 100%;
+  --surface-elevated: 220 14% 98%;
+  --surface-sunken: 220 14% 96%;
+
+  --text-primary: 222 47% 11%;
+  --text-muted: 215 16% 47%;
+  --text-disabled: 215 14% 65%;
+
+  --border-default: 220 13% 91%;
+  --border-strong: 215 16% 65%;
+
+  --accent: 239 84% 56%;
+  --accent-hover: 239 84% 48%;
+  --accent-foreground: 0 0% 100%;
+  --accent-soft: 239 100% 97%;
+
+  --success: 142 71% 45%;
+  --success-soft: 142 76% 95%;
+
+  --warning: 38 92% 50%;
+  --warning-soft: 48 100% 96%;
+
+  --danger: 0 72% 51%;
+  --danger-soft: 0 86% 97%;
+
+  --info: 217 91% 60%;
+  --info-soft: 214 100% 97%;
+
+  --focus-ring: 239 84% 56%;
+  --overlay: 222 47% 11%;
+  --overlay-alpha: 0.55;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+[data-theme='dark'],
+.dark {
+  --surface: 222 47% 8%;
+  --surface-elevated: 222 32% 13%;
+  --surface-sunken: 222 35% 11%;
+
+  --text-primary: 210 40% 98%;
+  --text-muted: 215 20% 65%;
+  --text-disabled: 215 14% 40%;
+
+  --border-default: 217 19% 22%;
+  --border-strong: 217 19% 35%;
+
+  --accent: 234 89% 74%;
+  --accent-hover: 239 84% 67%;
+  --accent-foreground: 222 47% 11%;
+  --accent-soft: 239 60% 18%;
+
+  --success: 142 65% 55%;
+  --success-soft: 142 60% 15%;
+
+  --warning: 38 95% 60%;
+  --warning-soft: 38 70% 14%;
+
+  --danger: 0 85% 65%;
+  --danger-soft: 0 65% 16%;
+
+  --info: 217 91% 70%;
+  --info-soft: 217 60% 16%;
+
+  --focus-ring: 234 89% 74%;
+  --overlay: 0 0% 0%;
+  --overlay-alpha: 0.7;
+}
+
+html {
+  color-scheme: light dark;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: hsl(var(--surface));
+  color: hsl(var(--text-primary));
+  font-family:
+    var(--font-geist-sans),
+    system-ui,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+
+  /* Visually hidden but still announced by screen readers. */
+  .sr-only-focusable:not(:focus):not(:focus-within) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .bg-overlay {
+    background-color: hsl(var(--overlay) / var(--overlay-alpha));
+  }
+}
+
+/* Respect reduced motion at the global level — covers third-party libs too. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

@@ -4,16 +4,16 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
-use DateTimeImmutable;
-use DateTimeZone;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * Shapes the Supabase JWT claims into the canonical `user` JSON we expose
- * to clients. The wrapping `{ "data": ... }` envelope is added by Laravel.
+ * Shapes the local {@see User} model into the canonical `user` JSON we
+ * expose to clients. The wrapping `{ "data": ... }` envelope is added
+ * automatically by Laravel.
  *
- * @property array<string, mixed> $resource
+ * @property-read User $resource
  */
 class UserResource extends JsonResource
 {
@@ -22,73 +22,17 @@ class UserResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        /** @var array<string, mixed> $claims */
-        $claims = (array) $this->resource;
-
-        /** @var array<string, mixed> $userMetadata */
-        $userMetadata = $this->arrayClaim($claims, 'user_metadata');
-
-        /** @var array<string, mixed> $appMetadata */
-        $appMetadata = $this->arrayClaim($claims, 'app_metadata');
+        /** @var User $user */
+        $user = $this->resource;
 
         return [
-            'id' => $this->stringOrNull($claims['sub'] ?? null),
-            'email' => $this->stringOrNull($claims['email'] ?? null),
-            'name' => $this->stringOrNull(
-                $userMetadata['full_name'] ?? $userMetadata['name'] ?? null
-            ),
-            'avatar_url' => $this->stringOrNull($userMetadata['avatar_url'] ?? null),
-            'provider' => $this->stringOrNull($appMetadata['provider'] ?? null),
-            'providers' => $this->arrayOfStringsOrEmpty($appMetadata['providers'] ?? null),
-            'created_at' => $this->iatToIso8601($claims['iat'] ?? null),
+            'id' => $user->id,
+            'email' => $user->email,
+            'name' => $user->name,
+            'avatar_url' => $user->avatar_url,
+            'locale' => $user->locale,
+            'timezone' => $user->timezone,
+            'last_seen_at' => $user->last_seen_at?->toIso8601String(),
         ];
-    }
-
-    /**
-     * @param  array<string, mixed>  $claims
-     * @return array<string, mixed>
-     */
-    private function arrayClaim(array $claims, string $key): array
-    {
-        $value = $claims[$key] ?? [];
-
-        return is_array($value) ? $value : [];
-    }
-
-    private function stringOrNull(mixed $value): ?string
-    {
-        if (is_string($value) && $value !== '') {
-            return $value;
-        }
-
-        return null;
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function arrayOfStringsOrEmpty(mixed $value): array
-    {
-        if (! is_array($value)) {
-            return [];
-        }
-
-        return array_values(array_filter(
-            array_map(static fn ($item): ?string => is_string($item) ? $item : null, $value),
-            static fn (?string $item): bool => $item !== null && $item !== '',
-        ));
-    }
-
-    private function iatToIso8601(mixed $iat): ?string
-    {
-        if (! is_int($iat) && ! (is_string($iat) && ctype_digit($iat))) {
-            return null;
-        }
-
-        $timestamp = (int) $iat;
-
-        return (new DateTimeImmutable('@'.$timestamp))
-            ->setTimezone(new DateTimeZone('UTC'))
-            ->format(DateTimeImmutable::ATOM);
     }
 }

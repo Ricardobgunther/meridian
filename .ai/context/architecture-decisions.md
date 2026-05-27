@@ -5,6 +5,100 @@ Novos ADRs: adicionar no topo, com data e status.
 
 ---
 
+## ADR-008 — Multi-tenancy via `Organization` + `Membership` (per-row scoping)
+**Data:** 2026-05-26
+**Status:** Aceito
+
+**Contexto:** Projeto1 é um starter template SaaS reutilizável. Todo SaaS B2B precisa de algum modelo de tenant. Três abordagens possíveis: (a) database-per-tenant, (b) schema-per-tenant, (c) per-row scoping com `organization_id`.
+
+**Decisão:** Per-row scoping (c). Toda tabela de domínio tem `organization_id UUID` FK; queries são automaticamente filtradas por tenant ativo via global scope no Eloquent.
+
+**Razões:**
+- Operacionalmente simples: um único banco, um único schema, migrations triviais.
+- Compatível com Supabase RLS — `auth.uid()` + tabela `memberships` definem acesso.
+- Escala para milhares de tenants sem explodir conexões ou migrations.
+- Padrão da indústria para SaaS multi-tenant inicial (Linear, Notion, Vercel).
+
+**Trade-offs:**
+- Bug em scope pode vazar dados entre tenants → mitigado com testes obrigatórios de isolamento + RLS no Postgres.
+- Backup/restore por tenant é mais trabalhoso → aceitável para starter.
+
+---
+
+## ADR-009 — Identificação de tenant via header `X-Organization-Id`
+**Data:** 2026-05-26
+**Status:** Aceito
+
+**Contexto:** O cliente precisa indicar qual organização está ativa em cada request. Opções: (a) prefixo de path `/api/v1/orgs/{id}/...`, (b) header `X-Organization-Id`, (c) subdomínio `acme.app.com`.
+
+**Decisão:** Header `X-Organization-Id: <uuid>`. Middleware `ResolveOrganization` valida que o usuário autenticado tem `Membership` ativo nessa organização e injeta `organization` + `membership` no request.
+
+**Razões:**
+- Path-based polui todas as rotas com `/{org}/` e exige duplicação no roteador.
+- Subdomínio exige DNS wildcard + custom domains — overengineering para starter.
+- Header desacopla recurso de tenant: a mesma rota `/api/v1/customers` serve qualquer tenant.
+
+**Trade-offs:**
+- URLs não revelam o tenant — debug requer inspecionar headers. Aceitável.
+- Frontend precisa lembrar de injetar o header em todo fetch → resolvido com client wrapper único.
+
+---
+
+## ADR-010 — RBAC fixo com três roles: `owner`, `admin`, `member`
+**Data:** 2026-05-26
+**Status:** Aceito
+
+**Contexto:** Starter precisa de RBAC, mas permissões granulares (Spatie Permission) introduzem complexidade desnecessária para a fase inicial.
+
+**Decisão:** Enum de roles fixo em `memberships.role`: `owner`, `admin`, `member`. Policies do Laravel checam role; nenhuma tabela de permissions.
+
+**Razões:**
+- 95% dos SaaS começam com esse modelo e só evoluem para granular quando o produto exige.
+- Policies em código são auditáveis no PR — vs permissions em DB que mudam runtime.
+- Migrar para Spatie depois é direto se necessário.
+
+**Trade-offs:**
+- Customização exige edição de código → aceitável para starter B2B típico.
+
+---
+
+## ADR-011 — `users` local com PK UUID espelhando `auth.uid()`
+**Data:** 2026-05-26
+**Status:** Aceito
+
+**Contexto:** Hoje `MeController` lê claims do JWT diretamente — não há linha local para o usuário. Para FKs (memberships, audit, etc.) precisamos de uma linha em `users`.
+
+**Decisão:** Tabela `users` com `id UUID PRIMARY KEY` igual ao `sub` do JWT do Supabase (`auth.uid()`). Upsert na primeira request autenticada (listener no `VerifySupabaseToken` ou middleware dedicado). Sem coluna `password` — auth é 100% Supabase.
+
+**Razões:**
+- FKs precisam de PK estável e referenciável.
+- Manter o ID idêntico ao Supabase simplifica RLS (`auth.uid() = users.id`).
+- Upsert lazy evita webhook do Supabase (que exigiria endpoint público).
+
+**Trade-offs:**
+- Primeira request após signup é levemente mais lenta (1 INSERT).
+- Dados do usuário ficam parcialmente duplicados (email no Supabase + email local) → aceitável; usamos `email` local apenas como cache.
+
+---
+
+## ADR-012 — Sem auto-criação de "organização pessoal" no signup
+**Data:** 2026-05-26
+**Status:** Aceito
+
+**Contexto:** Alguns SaaS criam uma "personal org" automaticamente para cada usuário; outros exigem que o usuário crie/seja convidado para uma organização.
+
+**Decisão:** Não criar org automaticamente. Após primeiro login, se o usuário não pertence a nenhuma organização, o frontend mostra empty state com CTA "Criar organização" ou "Aguardar convite".
+
+**Razões:**
+- Mais flexível para um starter: serve tanto B2B (org criada por admin) quanto produto onde admin convida todos.
+- Evita orgs órfãs no banco quando usuário só existe para ser convidado.
+- Padrão Linear/GitHub — não Vercel.
+
+**Trade-offs:**
+- Onboarding tem uma etapa extra → resolvido com fluxo claro no frontend.
+
+---
+
 ## ADR-007 — Usar Supabase Auth em vez de Laravel Passport
 **Data:** 2026-05  
 **Status:** Aceito

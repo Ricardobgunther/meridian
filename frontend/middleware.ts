@@ -40,7 +40,12 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
-  if (pathname.startsWith('/me') && !user) {
+  const protectedPrefixes = ['/me', '/dashboard', '/org', '/settings'];
+  const isProtected = protectedPrefixes.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`),
+  );
+
+  if (isProtected && !user) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.search = '';
@@ -49,7 +54,7 @@ export async function middleware(request: NextRequest) {
 
   if (pathname === '/login' && user) {
     const url = request.nextUrl.clone();
-    url.pathname = '/me';
+    url.pathname = '/dashboard';
     url.search = '';
     return NextResponse.redirect(url);
   }

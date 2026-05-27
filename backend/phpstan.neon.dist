@@ -7,3 +7,10 @@ parameters:
 
     # Nível 0-9. Comece em 5 e suba conforme o código amadurece.
     level: 5
+
+    # Future-use plumbing: the tenant-scoping trait is intentionally not
+    # applied to any model yet (no domain table carries `organization_id`
+    # at this point). Once the first domain model adopts it, remove this
+    # exclusion.
+    excludePaths:
+        - app/Models/Concerns/BelongsToOrganization.php
