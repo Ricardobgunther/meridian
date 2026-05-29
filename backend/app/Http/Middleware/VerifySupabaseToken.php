@@ -4,17 +4,18 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Services\Auth\SupabaseTokenVerifier;
 use App\Services\Auth\UserProvisioningService;
 use Closure;
+use DomainException;
 use Firebase\JWT\BeforeValidException;
 use Firebase\JWT\ExpiredException;
-use Firebase\JWT\JWT;
-use Firebase\JWT\Key;
 use Firebase\JWT\SignatureInvalidException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 use UnexpectedValueException;
@@ -34,6 +35,7 @@ class VerifySupabaseToken
 
     public function __construct(
         private readonly UserProvisioningService $userProvisioning,
+        private readonly SupabaseTokenVerifier $tokenVerifier,
     ) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -44,18 +46,19 @@ class VerifySupabaseToken
             return $this->unauthorized('Não autenticado.');
         }
 
-        $secret = config('supabase.jwt_secret');
-
-        if (! is_string($secret) || $secret === '') {
-            Log::error('SUPABASE_JWT_SECRET is not configured.');
+        try {
+            $claims = $this->tokenVerifier->decode($token);
+        } catch (ExpiredException|SignatureInvalidException|BeforeValidException|UnexpectedValueException|DomainException $e) {
+            Log::info('Supabase JWT rejected: signature or format invalid', ['ip' => $request->ip()]);
 
             return $this->unauthorized('Sessão expirada ou inválida.');
-        }
-
-        try {
-            $claims = JWT::decode($token, new Key($secret, 'HS256'));
-        } catch (ExpiredException|SignatureInvalidException|BeforeValidException|UnexpectedValueException $e) {
-            Log::info('Supabase JWT rejected: signature or format invalid', ['ip' => $request->ip()]);
+        } catch (RuntimeException $e) {
+            // Misconfiguration (missing secret/URL) or an unreachable JWKS
+            // endpoint — our problem, not the caller's. Log loudly but still
+            // return the generic 401 so we never leak config details.
+            Log::error('Supabase token verification unavailable.', [
+                'message' => $e->getMessage(),
+            ]);
 
             return $this->unauthorized('Sessão expirada ou inválida.');
         }
