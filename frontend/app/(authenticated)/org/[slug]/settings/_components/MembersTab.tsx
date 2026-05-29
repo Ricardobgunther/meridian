@@ -2,11 +2,14 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
+import { Button } from '@/components/ui/Button';
 import { t } from '@/lib/i18n/t';
 import { useMe } from '@/hooks/use-me';
 import { useActiveOrg } from '@/hooks/use-active-org';
 import { useMembers } from '@/hooks/use-members';
+import { useUiStore } from '@/lib/stores/ui-store';
 
+import { InviteModal } from './InviteModal';
 import { MemberRow } from './MemberRow';
 import { MembersPagination } from './MembersPagination';
 import { MembersToolbar, type RoleFilter } from './MembersToolbar';
@@ -16,6 +19,7 @@ import {
   MembersListSkeleton,
   MembersOnlyViewer,
 } from './MembersEmptyStates';
+import { PendingInvitationsSection } from './PendingInvitationsSection';
 
 interface MembersTabProps {
   slug: string;
@@ -80,12 +84,15 @@ export function MembersTab({ slug }: MembersTabProps) {
     setPage(1);
   }
 
+  const canInvite = role === 'owner' || role === 'admin';
+
   return (
     <div className="space-y-4">
-      <header className="flex items-baseline justify-between">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-text-primary">
           {t.settings.members.countLabel(total)}
         </h2>
+        {canInvite && <InviteMemberCta />}
       </header>
 
       <MembersToolbar
@@ -134,6 +141,27 @@ export function MembersTab({ slug }: MembersTabProps) {
           onChange={setPage}
         />
       )}
+
+      <PendingInvitationsSection orgId={organization.id} viewerRole={role} />
+
+      <InviteModal orgId={organization.id} />
     </div>
+  );
+}
+
+/**
+ * CTA "Convidar membro" do header. Botão controla o uiStore — separado em
+ * sub-componente para manter o `MembersTab` enxuto.
+ */
+function InviteMemberCta() {
+  const openModal = useUiStore((s) => s.openModal);
+  return (
+    <Button
+      variant="primary"
+      size="md"
+      onClick={() => openModal({ kind: 'invite-member' })}
+    >
+      {t.invitations.modal.triggerCta}
+    </Button>
   );
 }

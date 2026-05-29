@@ -7,6 +7,10 @@ import type {
  * Mensagens PT-BR para uso em toast/banner. `title` é o cabeçalho curto,
  * `message` é o detalhe. `fieldErrors` carrega o primeiro erro por campo
  * quando o backend retorna o formato Laravel 422.
+ *
+ * `domainCode` é o `code` arbitrário do backend (ex.: `invitation_expired`).
+ * Quando presente, consumidores devem ramificar por ele primeiro e só então
+ * cair no status. Mantém o contrato extensível sem inflar `ApiErrorCode`.
  */
 export interface ParsedApiError {
   title: string;
@@ -14,6 +18,7 @@ export interface ParsedApiError {
   fieldErrors?: Record<string, string>;
   code: ApiErrorCode;
   status: number;
+  domainCode?: string;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -49,6 +54,12 @@ export async function buildApiError(
     fieldErrors: extractRawFieldErrors(body),
     raw: body,
   };
+}
+
+function readDomainCode(body: unknown): string | undefined {
+  if (!isRecord(body)) return undefined;
+  const raw = body.code;
+  return typeof raw === 'string' && raw.length > 0 ? raw : undefined;
 }
 
 function extractRawFieldErrors(
@@ -164,6 +175,7 @@ export function parseApiError(err: unknown): ParsedApiError {
       fieldErrors,
       code: err.code,
       status: err.status,
+      domainCode: readDomainCode(err.raw),
     };
   }
 

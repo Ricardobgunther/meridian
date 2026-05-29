@@ -6,14 +6,19 @@ import { createClient } from '@/lib/supabase/server';
 export const dynamic = 'force-dynamic';
 
 export interface LoginPageProps {
-  searchParams: { error?: string | string[] };
+  searchParams: {
+    error?: string | string[];
+    invite?: string | string[];
+  };
 }
 
 /**
  * Tela de login. Server Component.
  *
- * - Se já existe sessão, redireciona para `/me`.
- * - Renderiza o card e propaga `?error=` para a faixa de erro acessível.
+ * - Se já existe sessão e há `?invite=`, redireciona direto para
+ *   `/invite/{token}` para retomar o fluxo de aceite.
+ * - Caso contrário, sessão existente vai para `/me`.
+ * - Sem sessão: renderiza o card propagando `error` e `invite`.
  */
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const supabase = createClient();
@@ -21,7 +26,13 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const rawInvite = searchParams.invite;
+  const inviteToken = Array.isArray(rawInvite) ? rawInvite[0] : rawInvite;
+
   if (user) {
+    if (inviteToken) {
+      redirect(`/invite/${encodeURIComponent(inviteToken)}`);
+    }
     redirect('/me');
   }
 
@@ -30,7 +41,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   return (
     <main className="flex min-h-screen w-full items-center justify-center bg-slate-50 px-4 py-12">
-      <LoginCard initialError={errorCode} />
+      <LoginCard initialError={errorCode} inviteToken={inviteToken} />
     </main>
   );
 }

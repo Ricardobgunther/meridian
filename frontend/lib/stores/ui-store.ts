@@ -10,13 +10,21 @@ export type ActiveModal =
   | { kind: 'create-org' }
   | { kind: 'confirm-delete-org'; orgId: string; orgName: string }
   | { kind: 'confirm-remove-member'; memberId: string; memberName: string }
-  | { kind: 'confirm-slug-change'; oldSlug: string; newSlug: string };
+  | { kind: 'confirm-slug-change'; oldSlug: string; newSlug: string }
+  | { kind: 'invite-member' }
+  | {
+      kind: 'confirm-revoke-invitation';
+      invitationId: string;
+      invitationEmail: string;
+    };
 
 export interface UiState {
   sidebarCollapsed: boolean;
   mobileDrawerOpen: boolean;
   theme: Theme;
   activeModal: ActiveModal;
+  /** null = usar default da spec (5+ pendentes começam colapsados). */
+  invitationsSectionCollapsed: boolean | null;
 
   toggleSidebar: () => void;
   setSidebarCollapsed: (v: boolean) => void;
@@ -24,6 +32,7 @@ export interface UiState {
   setTheme: (t: Theme) => void;
   openModal: (m: NonNullable<ActiveModal>) => void;
   closeModal: () => void;
+  setInvitationsSectionCollapsed: (v: boolean | null) => void;
 }
 
 /**
@@ -39,6 +48,7 @@ export const useUiStore = create<UiState>()(
       mobileDrawerOpen: false,
       theme: 'system',
       activeModal: null,
+      invitationsSectionCollapsed: null,
 
       toggleSidebar: () =>
         set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
@@ -47,6 +57,8 @@ export const useUiStore = create<UiState>()(
       setTheme: (t) => set({ theme: t }),
       openModal: (m) => set({ activeModal: m }),
       closeModal: () => set({ activeModal: null }),
+      setInvitationsSectionCollapsed: (v) =>
+        set({ invitationsSectionCollapsed: v }),
     }),
     {
       name: 'ui-store',
@@ -55,8 +67,9 @@ export const useUiStore = create<UiState>()(
       partialize: (s) => ({
         sidebarCollapsed: s.sidebarCollapsed,
         theme: s.theme,
+        invitationsSectionCollapsed: s.invitationsSectionCollapsed,
       }),
-      version: 1,
+      version: 2,
     },
   ),
 );

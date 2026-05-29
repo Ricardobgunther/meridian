@@ -103,3 +103,74 @@ export interface ApiError {
   /** Body bruto da resposta para diagnóstico (não exibir). */
   raw?: unknown;
 }
+
+// ── Invitations ─────────────────────────────────────────────────────────
+
+/** Role concedível por convite — `owner` nunca é ofertado. */
+export type InvitationRole = Exclude<Role, 'owner'>;
+
+export type InvitationStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
+
+export interface InvitationInviter {
+  id: string;
+  name: string | null;
+  email: string;
+  is_active_member: boolean;
+}
+
+export interface Invitation {
+  id: string;
+  organization_id: string;
+  email: string;
+  role: InvitationRole;
+  status: InvitationStatus;
+  expires_at: string;
+  created_at: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+  resent_at: string | null;
+  invited_by: InvitationInviter | null;
+}
+
+/** Resposta de GET /api/v1/invitations (Laravel ResourceCollection). */
+export interface InvitationsListResponse {
+  data: Invitation[];
+  links?: ApiListLinks;
+  meta?: ApiListMeta;
+}
+
+/**
+ * Preview público (GET /api/v1/invitations/accept/{token}).
+ *
+ * O backend retorna `{ data: <payload> }`; o payload é um union discriminado
+ * por `status`. Status `pending` carrega os detalhes; os demais são
+ * intencionalmente magros para evitar enumeration via response shape.
+ */
+export interface AcceptPreviewPending {
+  status: 'pending';
+  email: string;
+  role: InvitationRole;
+  expires_at: string;
+  organization: { id: string; slug: string; name: string } | null;
+  invited_by: { name: string | null } | null;
+}
+
+export type AcceptPreviewPayload =
+  | AcceptPreviewPending
+  | { status: 'expired' }
+  | { status: 'revoked' }
+  | { status: 'not_found' }
+  | { status: 'accepted' };
+
+export interface AcceptPreviewResponse {
+  data: AcceptPreviewPayload;
+}
+
+/** POST /api/v1/invitations/accept/{token} — sucesso. */
+export interface AcceptResponse {
+  data: {
+    membership: Membership;
+    organization: { id: string; slug: string; name: string } | null;
+    role: InvitationRole;
+  };
+}

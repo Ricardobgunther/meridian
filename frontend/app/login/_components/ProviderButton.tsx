@@ -16,6 +16,8 @@ export interface ProviderButtonProps {
   className: string;
   /** Callback opcional para reportar erro ao orquestrador (ex.: LoginCard). */
   onError?: (message: string) => void;
+  /** Token de convite a propagar para o callback (?invite=). */
+  inviteToken?: string | null;
 }
 
 /**
@@ -29,6 +31,7 @@ export function ProviderButton({
   icon,
   className,
   onError,
+  inviteToken,
 }: ProviderButtonProps) {
   const [loading, setLoading] = useState(false);
 
@@ -40,10 +43,15 @@ export function ProviderButton({
         typeof window !== 'undefined'
           ? window.location.origin
           : process.env.NEXT_PUBLIC_SITE_URL ?? '';
+      // Propaga ?invite=... para que o callback redirecione direto à
+      // página de aceite após o OAuth, em vez de aterrissar em /me.
+      const inviteQuery = inviteToken
+        ? `&invite=${encodeURIComponent(inviteToken)}`
+        : '';
       const { error } = await supabase.auth.signInWithOAuth({
         provider,
         options: {
-          redirectTo: `${origin}/auth/callback?next=/me`,
+          redirectTo: `${origin}/auth/callback?next=/me${inviteQuery}`,
         },
       });
       if (error) {

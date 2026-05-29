@@ -1,3 +1,4 @@
+import { invitations } from './dict/pt-BR/invitations';
 import { orgs } from './dict/pt-BR/orgs';
 import { settings } from './dict/pt-BR/settings';
 import { shell } from './dict/pt-BR/shell';
@@ -15,6 +16,7 @@ export const t = {
   shell,
   orgs,
   settings,
+  invitations,
 } as const;
 
 export type Dictionary = typeof t;
