@@ -19,7 +19,8 @@ export type InitialState =
   | { kind: 'wrong-email'; preview: AcceptPreviewPending; connectedEmail: string }
   | { kind: 'expired' }
   | { kind: 'revoked' }
-  | { kind: 'invalid' };
+  | { kind: 'invalid' }
+  | { kind: 'accepted' };
 
 interface InvitePageViewProps {
   token: string;
@@ -93,5 +94,7 @@ export function InvitePageView({
       return <HardStopCard kind="revoked" />;
     case 'invalid':
       return <HardStopCard kind="invalid" />;
+    case 'accepted':
+      return <HardStopCard kind="accepted" />;
   }
 }

@@ -123,6 +123,11 @@ export const invitations = {
     invalidTitle: 'Convite não encontrado.',
     invalidBody: 'O link pode estar incompleto ou ter sido digitado errado.',
 
+    acceptedTitle: 'Convite já aceito.',
+    acceptedBody:
+      'Você já faz parte desta organização. Acesse seu workspace para continuar.',
+    acceptedCta: 'Ir para o workspace',
+
     wrongEmailTitle: 'Este convite foi enviado para outro email.',
     wrongEmailConnectedAs: (email: string) =>
       `Você está conectado como ${email}.`,

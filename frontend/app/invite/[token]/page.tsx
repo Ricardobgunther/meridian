@@ -115,9 +115,10 @@ function resolveInitialState(
     case 'revoked':
       return { kind: 'revoked' };
     case 'accepted':
-      // Convite já consumido por outra sessão — UX equivale a "expired"
-      // (não disponível). Mantemos resposta amistosa.
-      return { kind: 'expired' };
+      // Convite já consumido (provavelmente o próprio usuário aceitou em
+      // outra aba). Mostramos um estado positivo dedicado, não "expirou"
+      // (follow-up R9).
+      return { kind: 'accepted' };
     case 'not_found':
     default:
       return { kind: 'invalid' };

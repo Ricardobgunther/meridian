@@ -62,11 +62,12 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 - **Risco:** hard reload é intencional (limpar cookies stale) mas perde toasts pendentes.
 - **Proposta:** ou aceitar trade-off (documentar inline), ou flushar/aguardar toast antes do reload.
 
-### R9 — Estado `accepted` colapsado como `expired` no UX
-- **Arquivo:** `frontend/app/invite/[token]/page.tsx:117-120`
+### R9 — Estado `accepted` colapsado como `expired` no UX ✅ RESOLVIDO (2026-05-29)
+- **Arquivo:** `frontend/app/invite/[token]/page.tsx`
 - **Agent:** `frontend-agent`
 - **Risco:** usuário que aceitou em outra aba vê "expirou" em vez de "já aceito" → confusão.
 - **Proposta:** quarta variante `HardStopCard kind="accepted"` com mensagem "Convite já aceito" + CTA para o workspace.
+- **Resolução:** adicionada a variante `HardStopCard kind="accepted"` (`role="status"`, não `alert` — estado positivo, spec §6; ícone `CheckCircle2` em `text-accent`). `resolveInitialState` mapeia `status: 'accepted' → { kind: 'accepted' }`. Como o preview de convite consumido não traz o slug da org, a CTA "Ir para o workspace" aponta para `/` (roteia o usuário autenticado). Novas strings `acceptedTitle/Body/Cta`. Coberto por teste no `InvitePageView.test.tsx`.
 
 ### R10 — Token raw em path-param de logs de access
 - **Arquivo:** `frontend/app/invite/[token]/page.tsx:78-89` + observabilidade
@@ -83,6 +84,12 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 - **Risco:** `Mail::...->send()` roda síncrono dentro do `DB::transaction()`. Um SMTP lento/falho segura o lock da linha (agora mais relevante após o lock por-convite do R1) e pode reverter uma mudança de estado de intenção-commitada. Levantado pelo `review-agent` ao revisar R1 — pré-existente, não introduzido por R1.
 - **Proposta:** trocar para `Mail::...->queue()` ou dispatch-after-commit, depois que o worker de fila estiver no docker-compose (já há um `TODO(queue)` no método).
 
+### R12 — Ramo `status === 409` morto no `AcceptForm`
+- **Arquivo:** `frontend/app/invite/[token]/_components/AcceptForm.tsx:63-66`
+- **Agent:** `frontend-agent`
+- **Risco:** o fluxo de accept nunca retorna 409 (esse status só nasce em `invite()` via `InvitationAlreadyPendingException`). O ramo `setAlreadyUsed(true)`, o state `alreadyUsed` e a string `inlineErrorAlreadyUsed` são código defensivo inalcançável — confunde manutenção futura. Levantado pelo `review-agent` ao revisar R9; pré-existente, fora do escopo do R9.
+- **Proposta:** remover o ramo 409 + `useState alreadyUsed`, simplificar o bloco de alerta para usar só `inlineError`; checar se `inlineErrorAlreadyUsed` ainda tem consumidor antes de remover do dicionário.
+
 ---
 
 ## Não-funcionais
@@ -90,4 +97,4 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 - Total: **10 follow-ups** (6 backend, 3 frontend, 1 misto).
 - Nenhum é blocker para merge.
 - Sugestão de priorização: **R1 > R4 > R9 > R6 > R2 > R5 > R3 > R7 > R8 > R10**.
-- **Status (2026-05-29):** R1 ✅ e R4 ✅ resolvidos. R11 adicionado (mail-in-transaction, levantado no review do R1). Restam 9: R9, R6, R2, R5, R3, R7, R8, R10, R11.
+- **Status (2026-05-29):** R1 ✅, R4 ✅ e R9 ✅ resolvidos. R11 e R12 adicionados (levantados nos reviews de R1 e R9). Restam 9: R6, R2, R5, R3, R7, R8, R10, R11, R12.

@@ -148,6 +148,28 @@ describe('InvitePageView — initial state routing', () => {
     ).toBeInTheDocument();
   });
 
+  it('renders the accepted card as a positive status (not an alert)', () => {
+    render(
+      <InvitePageView
+        token="t"
+        initial={{ kind: 'accepted' }}
+        sessionEmail="bruno@acme.com"
+      />,
+    );
+
+    expect(
+      screen.getByText(t.invitations.accept.acceptedTitle),
+    ).toBeInTheDocument();
+    // Positive terminal state → role="status", never "alert".
+    expect(screen.getByRole('status')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    // CTA points at the workspace, not the marketing home.
+    const cta = screen.getByRole('link', {
+      name: t.invitations.accept.acceptedCta,
+    });
+    expect(cta).toHaveAttribute('href', '/');
+  });
+
   it('renders the wrong-email card when initial=wrong-email', () => {
     const initial: InitialState = {
       kind: 'wrong-email',
