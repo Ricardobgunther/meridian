@@ -22,8 +22,9 @@ use Illuminate\Support\Facades\Mail;
 | lives in `AcceptInvitationApiTest`.
 |
 | Tenancy contract: the active organization comes from `X-Organization-Id`
-| via the `org.resolve` middleware. Cross-tenant safety is enforced by
-| `InvitationPolicy` (deliberate 403, not 404 — see route comment).
+| via the `org.resolve` middleware. The `{invitation}` route bind scopes
+| to that same header, so a cross-tenant id 404s at the binding layer
+| (follow-up R4 — see route comment), same as `{member}`.
 |
 | Auth setup mirrors `MembersApiTest`: swap the JWT secret to the
 | deterministic test constant, reuse `actingAsSupabaseUser()`.
@@ -627,8 +628,10 @@ describe('DELETE /api/v1/invitations/{invitation}', function (): void {
         expect($invite->fresh()->status)->toBe(InvitationStatus::Accepted);
     });
 
-    it('returns 403 cross-tenant (different orgs)', function (): void {
-        // Caller owns org A, tries to revoke an invite in org B.
+    it('returns 404 cross-tenant (different orgs)', function (): void {
+        // Caller owns org A, tries to revoke an invite in org B. The bind
+        // scopes by the X-Organization-Id header (org A), so org B's row is
+        // never found — 404 instead of leaking its existence via a 403 (R4).
         ['headers' => $headers] = ownedOrg();
 
         $orgB = Organization::factory()->create();
@@ -636,7 +639,7 @@ describe('DELETE /api/v1/invitations/{invitation}', function (): void {
 
         $this->withHeaders($headers)
             ->deleteJson("/api/v1/invitations/{$invite->id}")
-            ->assertStatus(403);
+            ->assertStatus(404);
 
         // Untouched.
         expect($invite->fresh()->status)->toBe(InvitationStatus::Pending);
@@ -762,7 +765,28 @@ describe('POST /api/v1/invitations/{invitation}/resend', function (): void {
             ->assertJsonPath('code', 'invitation_rate_limited');
     });
 
-    it('returns 403 cross-tenant', function (): void {
+    it('rate-limits a second resend inside the per-invite cooldown (R1)', function (): void {
+        ['org' => $org, 'headers' => $headers] = ownedOrg();
+
+        $invite = Invitation::factory()->create([
+            'organization_id' => $org->id,
+            'status' => InvitationStatus::Pending->value,
+        ]);
+
+        // First resend succeeds and stamps last_resent_at.
+        $this->withHeaders($headers)
+            ->postJson("/api/v1/invitations/{$invite->id}/resend")
+            ->assertOk();
+
+        // Immediate second resend is inside the cooldown → 429.
+        $this->withHeaders($headers)
+            ->postJson("/api/v1/invitations/{$invite->id}/resend")
+            ->assertStatus(429)
+            ->assertJsonPath('code', 'invitation_rate_limited');
+    });
+
+    it('returns 404 cross-tenant', function (): void {
+        // Bind scopes by X-Organization-Id (org A); org B's row is invisible (R4).
         ['headers' => $headers] = ownedOrg();
 
         $orgB = Organization::factory()->create();
@@ -770,7 +794,7 @@ describe('POST /api/v1/invitations/{invitation}/resend', function (): void {
 
         $this->withHeaders($headers)
             ->postJson("/api/v1/invitations/{$invite->id}/resend")
-            ->assertStatus(403);
+            ->assertStatus(404);
     });
 
     it('returns 403 when a plain member tries to resend', function (): void {

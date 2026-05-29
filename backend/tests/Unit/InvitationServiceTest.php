@@ -374,6 +374,42 @@ describe('InvitationService::resend()', function (): void {
         expect(fn () => $this->service->resend($target))
             ->toThrow(InvitationRateLimitException::class);
     });
+
+    it('blocks a second resend inside the per-invite cooldown window (R1)', function (): void {
+        $org = Organization::factory()->create();
+        $inviter = User::factory()->create();
+        $result = $this->service->invite($org, $inviter, 'cooldown@example.com', MembershipRole::Member);
+
+        // First resend stamps last_resent_at; a second one a few seconds
+        // later must trip the cooldown even though no new row is created
+        // (so the org-wide created_at limit never sees it).
+        Carbon::setTestNow(Carbon::now()->addSeconds(30));
+        try {
+            $first = $this->service->resend($result['invitation']);
+
+            Carbon::setTestNow(Carbon::now()->addSeconds(10));
+            expect(fn () => $this->service->resend($first['invitation']->fresh()))
+                ->toThrow(InvitationRateLimitException::class);
+        } finally {
+            Carbon::setTestNow();
+        }
+    });
+
+    it('allows a resend once the cooldown window has elapsed (R1)', function (): void {
+        $org = Organization::factory()->create();
+        $inviter = User::factory()->create();
+        $result = $this->service->invite($org, $inviter, 'cooldown-ok@example.com', MembershipRole::Member);
+
+        $first = $this->service->resend($result['invitation']);
+
+        Carbon::setTestNow(Carbon::now()->addSeconds(61));
+        try {
+            $second = $this->service->resend($first['invitation']->fresh());
+            expect($second['token'])->not->toBe($first['token']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    });
 });
 
 // ─── decline() ───────────────────────────────────────────────────────────────

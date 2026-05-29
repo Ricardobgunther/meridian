@@ -63,28 +63,35 @@ Route::bind('member', function (string $id, $route): Membership {
 | bind closure cannot rely on `current_organization_id` being set when it
 | fires.
 |
-| Solution split in two:
-|   - The bind closure only does a soft-delete filter + id match. A
-|     non-existent id 404's at the binding layer (same UX as members).
-|   - Cross-tenant safety is enforced in {@see \App\Http\Controllers\Api\V1\InvitationController}
-|     via {@see \App\Policies\InvitationPolicy} — the policy checks
-|     "actor's role in the invitation's org" and rejects when the user
-|     isn't an admin of THAT org. The user is never an admin of an org
-|     they don't belong to, so cross-tenant access becomes a 403.
+| We cannot read the resolved `current_organization_id` here (it isn't set
+| until `org.resolve` runs, after this bind), but we CAN read the raw
+| `X-Organization-Id` header off the request — the same source
+| `org.resolve` uses. Scoping the bind by that header makes a cross-tenant
+| id 404 at the binding layer (same UX as `{member}`) instead of leaking
+| the row's existence via a 403 from the policy:
+|   - Header = attacker's own org + a foreign invitation id → the org
+|     filter misses → 404. The foreign row's existence is never confirmed.
+|   - Header = a foreign org the attacker doesn't belong to → the bind may
+|     match, but `org.resolve` then 403s on "no membership in that org",
+|     which only reveals org-membership status, not invitation existence.
 |
-| Note: 403 (vs the 404 used for `{member}`) is a deliberate trade-off
-| here. To get 404 we'd need to reorder the middleware stack so
-| `org.resolve` runs before `SubstituteBindings`, which is a global
-| change with ripple effects. 403 is also a defensible answer to
-| "you're poking at a row that isn't yours" and matches what RLS would
-| emit at the DB layer.
+| When the header is absent/blank we leave the query unscoped: `org.resolve`
+| rejects the request with 400 ("header obrigatório") before the controller
+| runs, so no existence signal escapes regardless of whether the bind matched.
 |
 */
 Route::bind('invitation', function (string $id): Invitation {
-    return Invitation::query()
+    $orgId = request()->header('X-Organization-Id');
+
+    $query = Invitation::query()
         ->whereKey($id)
-        ->whereNull('deleted_at')
-        ->firstOrFail();
+        ->whereNull('deleted_at');
+
+    if (is_string($orgId) && $orgId !== '') {
+        $query->where('organization_id', $orgId);
+    }
+
+    return $query->firstOrFail();
 });
 
 /*
@@ -135,7 +142,7 @@ Route::prefix('v1')
 
             // ── Invitations (admin-facing) ──────────────────────────
             // Active org is resolved from `X-Organization-Id`; the
-            // `{invitation}` bind scopes to that org so cross-tenant
+            // `{invitation}` bind scopes to that same header so cross-tenant
             // ids 404 at the binding layer (same pattern as `{member}`).
             Route::get('/invitations', [InvitationController::class, 'index'])
                 ->name('v1.invitations.index');

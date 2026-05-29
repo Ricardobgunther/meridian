@@ -8,11 +8,12 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 
 ## Backend
 
-### R1 — Resend sem rate-limit por-convite
-- **Arquivo:** `backend/app/Services/InvitationService.php:108-140`
+### R1 — Resend sem rate-limit por-convite ✅ RESOLVIDO (2026-05-29)
+- **Arquivo:** `backend/app/Services/InvitationService.php`
 - **Agent:** `backend-agent`
 - **Risco:** `guardRateLimit` conta apenas linhas `created_at >= now()-24h`. Como `resend()` muta a linha existente, um admin pode reenviar o MESMO convite N vezes sem trip do limite, gerando spam dirigido. O `throttle:60,1` do roteador é só por-IP.
 - **Proposta:** rastrear `last_resent_at` na linha + aplicar cooldown (ex.: 5min), OU contar resends por `(organization_id, target_invitation_id)` em janela curta (ex.: 5/h por convite).
+- **Resolução:** coluna `last_resent_at` (migration `..._000006`) + `guardResendCooldown()` com janela de 60s por convite (alinha com "1 por minuto" do `00-overview.md` §7.4). Reusa `InvitationRateLimitException` (429 `invitation_rate_limited`). Coberto por testes unitário + feature.
 
 ### R2 — Race no count do rate-limit
 - **Arquivo:** `backend/app/Services/InvitationService.php:456-468`
@@ -26,11 +27,12 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 - **Risco:** viola `.ai/context/conventions.md`. Funcionalidade está coesa, mas há espaço para extrair.
 - **Proposta:** extrair `InvitationGuards` (já-membro / já-pending / rate-limit) ou `InvitationTokenIssuer` (`generateRawToken` / `hashToken` / `findByToken*`).
 
-### R4 — Cross-tenant invitation retorna 403 em vez de 404
-- **Arquivo:** `backend/routes/api.php:75-80`
+### R4 — Cross-tenant invitation retorna 403 em vez de 404 ✅ RESOLVIDO (2026-05-29)
+- **Arquivo:** `backend/routes/api.php`
 - **Agent:** `backend-agent`
 - **Risco:** `SubstituteBindings` roda antes de `org.resolve`, então o bind `{invitation}` não filtra por org → cai na policy → 403. Confirma a existência do convite a um atacante em outro tenant (vazamento minor).
 - **Proposta:** aninhar rota como `/organizations/{organization}/invitations/{invitation}` (mesmo padrão que `{member}` já usa), eliminando dependência do header `X-Organization-Id`.
+- **Resolução:** sem mudar o contrato da API (zero respingo no frontend) — o bind `{invitation}` agora escopa pela própria `X-Organization-Id` lida do request. Id de outro tenant some no filtro → 404 na camada de binding (mesma UX que `{member}`). Header de outro tenant cai no 403 do `org.resolve` (só revela membership, não existência do convite). Testes cross-tenant de destroy/resend atualizados para 404.
 
 ### R5 — Throttle único na accept-flow
 - **Arquivo:** `backend/routes/api.php:168`
@@ -80,3 +82,4 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 - Total: **10 follow-ups** (6 backend, 3 frontend, 1 misto).
 - Nenhum é blocker para merge.
 - Sugestão de priorização: **R1 > R4 > R9 > R6 > R2 > R5 > R3 > R7 > R8 > R10**.
+- **Status (2026-05-29):** R1 ✅ e R4 ✅ resolvidos. Restam 8: R9, R6, R2, R5, R3, R7, R8, R10.

@@ -43,6 +43,16 @@ class InvitationService
     private const RATE_LIMIT_MAX = 20;
 
     /**
+     * Minimum gap between two resends of the SAME invitation — follow-up
+     * R1. The org-wide issuance limit counts rows by `created_at`, which
+     * resend() never touches (it mutates an existing row), so without this
+     * a single invite could be re-sent unbounded times, spamming the
+     * recipient. Matches the "1 per minute per invite" contract assumed by
+     * the invite spec (`00-overview.md` §7.4).
+     */
+    private const RESEND_COOLDOWN_SECONDS = 60;
+
+    /**
      * @return array{invitation: Invitation, token: string}
      *
      * @throws InvitationAlreadyMemberException
@@ -124,12 +134,15 @@ class InvitationService
                 throw new InvitationNotPendingException();
             }
 
+            $this->guardResendCooldown($fresh);
+
             $organization = $fresh->organization()->firstOrFail();
             $this->guardRateLimit($organization);
 
             $token = $this->generateRawToken();
             $fresh->token_hash = $this->hashToken($token);
             $fresh->expires_at = Carbon::now()->addDays(self::TTL_DAYS);
+            $fresh->last_resent_at = Carbon::now();
             $fresh->save();
             $fresh->load(['invitedBy', 'organization']);
 
@@ -449,6 +462,28 @@ class InvitationService
 
         if ($hasPending) {
             throw new InvitationAlreadyPendingException();
+        }
+    }
+
+    /**
+     * Reject a resend that lands inside the per-invitation cooldown
+     * window — follow-up R1. Called on the lock-held `$fresh` row so two
+     * parallel resends cannot both read a stale `last_resent_at`.
+     *
+     * @throws InvitationRateLimitException
+     */
+    private function guardResendCooldown(Invitation $invitation): void
+    {
+        $lastResentAt = $invitation->last_resent_at;
+
+        // Version-agnostic: avoid diffInSeconds() whose sign differs
+        // between Carbon 2 and 3. "cooldown still active" === the moment
+        // the window closes is still in the future.
+        if (
+            $lastResentAt !== null
+            && $lastResentAt->copy()->addSeconds(self::RESEND_COOLDOWN_SECONDS)->isFuture()
+        ) {
+            throw new InvitationRateLimitException();
         }
     }
 
