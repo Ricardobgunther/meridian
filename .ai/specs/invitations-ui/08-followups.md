@@ -1,0 +1,82 @@
+# Invitations — Follow-ups pós-review
+
+Ressalvas do `review-agent` (2026-05-28) que **não bloquearam o merge** mas precisam de tratamento posterior. Veredito original: **APROVADO COM RESSALVAS**. Backend 104/104 verde; frontend 145/145 verde.
+
+Cada item lista: arquivo / agent responsável / risco / proposta.
+
+---
+
+## Backend
+
+### R1 — Resend sem rate-limit por-convite
+- **Arquivo:** `backend/app/Services/InvitationService.php:108-140`
+- **Agent:** `backend-agent`
+- **Risco:** `guardRateLimit` conta apenas linhas `created_at >= now()-24h`. Como `resend()` muta a linha existente, um admin pode reenviar o MESMO convite N vezes sem trip do limite, gerando spam dirigido. O `throttle:60,1` do roteador é só por-IP.
+- **Proposta:** rastrear `last_resent_at` na linha + aplicar cooldown (ex.: 5min), OU contar resends por `(organization_id, target_invitation_id)` em janela curta (ex.: 5/h por convite).
+
+### R2 — Race no count do rate-limit
+- **Arquivo:** `backend/app/Services/InvitationService.php:456-468`
+- **Agent:** `backend-agent`
+- **Risco:** `SELECT COUNT()` dentro de `DB::transaction()` no isolamento padrão (read committed) não bloqueia concorrentes. Duas requests paralelas podem passar o guard com 19 visíveis e ambas inserir → 21 total. Janela pequena, sem impacto crítico.
+- **Proposta:** `LOCK TABLE invitations IN SHARE ROW EXCLUSIVE MODE` ou contagem com `FOR UPDATE` no row do organization.
+
+### R3 — `InvitationService` excede limite de 300 linhas
+- **Arquivo:** `backend/app/Services/InvitationService.php` (481 linhas brutas, ~304 efetivas)
+- **Agent:** `backend-agent`
+- **Risco:** viola `.ai/context/conventions.md`. Funcionalidade está coesa, mas há espaço para extrair.
+- **Proposta:** extrair `InvitationGuards` (já-membro / já-pending / rate-limit) ou `InvitationTokenIssuer` (`generateRawToken` / `hashToken` / `findByToken*`).
+
+### R4 — Cross-tenant invitation retorna 403 em vez de 404
+- **Arquivo:** `backend/routes/api.php:75-80`
+- **Agent:** `backend-agent`
+- **Risco:** `SubstituteBindings` roda antes de `org.resolve`, então o bind `{invitation}` não filtra por org → cai na policy → 403. Confirma a existência do convite a um atacante em outro tenant (vazamento minor).
+- **Proposta:** aninhar rota como `/organizations/{organization}/invitations/{invitation}` (mesmo padrão que `{member}` já usa), eliminando dependência do header `X-Organization-Id`.
+
+### R5 — Throttle único na accept-flow
+- **Arquivo:** `backend/routes/api.php:168`
+- **Agent:** `backend-agent`
+- **Risco:** `throttle:60,1` cobre GET preview + POST accept no mesmo bucket por IP. Com 256 bits de entropia o risco de brute-force é zero hoje, mas um throttle mais apertado no POST é defesa em profundidade.
+- **Proposta:** named limiter `accept_invitation` em `AppServiceProvider` (ex.: 10/min/IP no POST).
+
+### R6 — Payload de accept não devolve `your_role`
+- **Arquivo:** `backend/app/Http/Controllers/Api/V1/AcceptInvitationController.php:98-108`
+- **Agent:** `backend-agent`
+- **Risco:** frontend (`use-accept-invitation.ts:36`) precisa invalidar queries e re-buscar o role → round-trip extra após aceitar.
+- **Proposta:** incluir `your_role` no payload `organization.*`.
+
+---
+
+## Frontend
+
+### R7 — Literal `"convidado por "` fora do dicionário
+- **Arquivo:** `frontend/app/(authenticated)/org/[slug]/settings/_components/PendingInvitationRow.tsx:52`
+- **Agent:** `frontend-agent`
+- **Risco:** viola "nunca colar literais" do header de `invitations.ts`. Quebra futura tradução EN.
+- **Proposta:** criar `t.invitations.list.invitedByLabel` (string fixa) e usar em conjunto com o tier visual já existente.
+
+### R8 — Sign-out via `window.location.assign` perde toasts
+- **Arquivo:** `frontend/app/invite/[token]/_components/SignOutButton.tsx:31`
+- **Agent:** `frontend-agent`
+- **Risco:** hard reload é intencional (limpar cookies stale) mas perde toasts pendentes.
+- **Proposta:** ou aceitar trade-off (documentar inline), ou flushar/aguardar toast antes do reload.
+
+### R9 — Estado `accepted` colapsado como `expired` no UX
+- **Arquivo:** `frontend/app/invite/[token]/page.tsx:117-120`
+- **Agent:** `frontend-agent`
+- **Risco:** usuário que aceitou em outra aba vê "expirou" em vez de "já aceito" → confusão.
+- **Proposta:** quarta variante `HardStopCard kind="accepted"` com mensagem "Convite já aceito" + CTA para o workspace.
+
+### R10 — Token raw em path-param de logs de access
+- **Arquivo:** `frontend/app/invite/[token]/page.tsx:78-89` + observabilidade
+- **Agent:** `devops-agent` (config) + `frontend-agent` (longo prazo)
+- **Risco:** `/api/v1/invitations/accept/<token>` aparece em logs de access do Next runtime e ferramentas de observabilidade. O token raw é a credencial.
+- **Proposta curto prazo:** documentar no runbook que rotas `/api/v1/invitations/accept/*` não devem ser logadas em produção.
+- **Proposta longo prazo:** mover token para header customizado (`X-Invitation-Token`) — mudança contratual, exige coordenação com backend.
+
+---
+
+## Não-funcionais
+
+- Total: **10 follow-ups** (6 backend, 3 frontend, 1 misto).
+- Nenhum é blocker para merge.
+- Sugestão de priorização: **R1 > R4 > R9 > R6 > R2 > R5 > R3 > R7 > R8 > R10**.

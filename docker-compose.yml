@@ -1,0 +1,28 @@
+services:
+  # Mailpit — SMTP catcher for local development.
+  # Backend (Laravel) envia emails para porta 1025; UI web disponível em http://localhost:8025.
+  # Não usar em produção.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: projeto1-mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # UI web
+    environment:
+      MP_MAX_MESSAGES: 500
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8025/readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+    name: projeto1-network

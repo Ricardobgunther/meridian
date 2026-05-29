@@ -144,7 +144,36 @@ OPCACHE_VALIDATE_TIMESTAMPS=0
 6379  → Redis (interno)
 5432  → PostgreSQL Supabase (remoto)
 8888  → Laravel Telescope (dev only)
+1025  → Mailpit SMTP (dev only)
+8025  → Mailpit UI web (dev only)
 ```
+
+## Email (dev)
+
+Em desenvolvimento, o Laravel envia emails via SMTP para o **Mailpit**,
+um catcher de email que substitui o envio real. Nenhum email sai para
+a internet — todos ficam retidos para inspeção.
+
+```bash
+docker compose up -d mailpit         # iniciar Mailpit
+# abrir a UI:
+open http://localhost:8025           # macOS
+xdg-open http://localhost:8025       # Linux
+```
+
+Configuração no `backend/.env` (já vem no `.env.example`):
+
+```
+MAIL_MAILER=smtp
+MAIL_HOST=mailpit       # use "localhost" se rodar o PHP fora do Docker
+MAIL_PORT=1025
+MAIL_FROM_ADDRESS="no-reply@projeto1.local"
+APP_FRONTEND_URL=http://localhost:3000   # usado para compor links nos emails
+```
+
+Em staging/produção, troque `MAIL_MAILER` para o driver real (ex.: `ses`,
+`mailgun`) e configure as credenciais via secrets — Mailpit é exclusivamente
+ferramenta de desenvolvimento.
 
 ## Comandos Rápidos
 

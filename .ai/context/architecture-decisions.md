@@ -5,6 +5,30 @@ Novos ADRs: adicionar no topo, com data e status.
 
 ---
 
+## ADR-013 — `invitations` com `token_hash`, expiração obrigatória e status enum
+**Data:** 2026-05-27
+**Status:** Aceito
+
+**Contexto:** O bloco de convites por email precisa de uma tabela onde owners/admins emitem convites para um email entrar como `member` ou `admin` de uma `organization`. O destinatário aceita via link público contendo um token. Três decisões não-óbvias precisaram de registro.
+
+**Decisão:**
+
+1. **Token nunca armazenado em claro** — guardamos apenas `token_hash CHAR(64) UNIQUE`, um SHA-256 do token cru. O token cru só existe no email enviado. Um vazamento do dump da tabela não permite aceitar convites.
+2. **`expires_at` é NOT NULL** — todo convite tem TTL obrigatório (default no service: now()+7d). Um job futuro varre `status='pending' AND expires_at < now()` e promove para `expired`. O índice `idx_invitations_expires_at` existe para esse sweep.
+3. **`status` é um enum string `pending|accepted|revoked|expired`** com CHECK constraint no Postgres e validação no app para SQLite — mesmo padrão de `memberships.role` (ADR-010). Modelar como tabela de estados completos (em vez de booleanos `is_accepted`, `is_revoked`) deixa as transições explícitas e o índice `(organization_id, status)` cobre a listagem do admin.
+
+**Razões:**
+- Hash do token é prática padrão para reset/invitation tokens (OWASP ASVS V2.1.9). Custo é uma chamada `hash()` por lookup; o índice unique em `token_hash` mantém o lookup em O(log n).
+- Expiração obrigatória elimina a classe inteira de bugs "convite de 2 anos atrás ainda funciona". Default em service (não em DB) permite override em testes sem reescrever a migration.
+- Enum string em vez de tabela de status: 4 estados estáveis, sem necessidade de metadata por estado. Mesma estratégia já usada em `memberships.role`.
+
+**Trade-offs:**
+- Não suportamos `citext` para o email — em vez disso normalizamos para lowercase no service e indexamos `LOWER(email)`. Evita dependência de extensão Postgres e mantém paridade com SQLite (CI). O índice único parcial em `(organization_id, LOWER(email)) WHERE status='pending' AND deleted_at IS NULL` previne convites pendentes duplicados sem bloquear reemissão após accept/revoke.
+- `owner` é deliberadamente proibido como `role` em `invitations` (CHECK aceita apenas `member|admin`). Transferência de ownership é fluxo separado e fora do bloco de convites — força o admin a executar uma ação consciente em vez de "transferir por engano via convite".
+- RLS dá acesso a owners/admins do org via `auth.uid()`; o destinatário aceita por endpoint público que valida o `token_hash` server-side com o service_role do Laravel — não via RLS.
+
+---
+
 ## ADR-008 — Multi-tenancy via `Organization` + `Membership` (per-row scoping)
 **Data:** 2026-05-26
 **Status:** Aceito
@@ -116,6 +140,18 @@ Novos ADRs: adicionar no topo, com data e status.
 **Trade-offs:**
 - Dependência de serviço externo para auth
 - Laravel não gerencia tokens — validação via JWT decode
+
+**Validação de assinatura (atualização 2026-05):** o Supabase migrou tokens de
+usuário para *JWT signing keys* assimétricas (ES256). O `VerifySupabaseToken`
+delega ao `SupabaseTokenVerifier`, que escolhe a chave pelo `alg` do header:
+- `HS256` → segredo compartilhado legado (`SUPABASE_JWT_SECRET`), ainda usado
+  pelos API keys `anon`/`service`.
+- `ES256`/`RS256` → chaves públicas do projeto, buscadas em
+  `{SUPABASE_URL}/auth/v1/.well-known/jwks.json` e cacheadas (1h, refetch on
+  `kid` miss).
+Por isso `SUPABASE_URL` é **obrigatória** — sem ela não há como validar tokens
+assimétricos. `alg` é restrito a uma allow-list (`HS256/ES256/RS256`) para
+barrar `alg: none`.
 
 ---
 
