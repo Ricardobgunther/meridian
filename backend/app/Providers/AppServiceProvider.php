@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Models\Invitation;
 use App\Models\Membership;
 use App\Models\Organization;
+use App\Policies\InvitationPolicy;
 use App\Policies\MembershipPolicy;
 use App\Policies\OrganizationPolicy;
 use Illuminate\Support\Facades\Gate;
@@ -32,5 +34,6 @@ class AppServiceProvider extends ServiceProvider
     {
         Gate::policy(Organization::class, OrganizationPolicy::class);
         Gate::policy(Membership::class, MembershipPolicy::class);
+        Gate::policy(Invitation::class, InvitationPolicy::class);
     }
 }
