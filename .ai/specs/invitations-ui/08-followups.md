@@ -77,9 +77,17 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 
 ---
 
+### R11 — Envio de email síncrono dentro da transação
+- **Arquivo:** `backend/app/Services/InvitationService.php` (`dispatchInvitationMail` em `invite()` e `resend()`)
+- **Agent:** `backend-agent`
+- **Risco:** `Mail::...->send()` roda síncrono dentro do `DB::transaction()`. Um SMTP lento/falho segura o lock da linha (agora mais relevante após o lock por-convite do R1) e pode reverter uma mudança de estado de intenção-commitada. Levantado pelo `review-agent` ao revisar R1 — pré-existente, não introduzido por R1.
+- **Proposta:** trocar para `Mail::...->queue()` ou dispatch-after-commit, depois que o worker de fila estiver no docker-compose (já há um `TODO(queue)` no método).
+
+---
+
 ## Não-funcionais
 
 - Total: **10 follow-ups** (6 backend, 3 frontend, 1 misto).
 - Nenhum é blocker para merge.
 - Sugestão de priorização: **R1 > R4 > R9 > R6 > R2 > R5 > R3 > R7 > R8 > R10**.
-- **Status (2026-05-29):** R1 ✅ e R4 ✅ resolvidos. Restam 8: R9, R6, R2, R5, R3, R7, R8, R10.
+- **Status (2026-05-29):** R1 ✅ e R4 ✅ resolvidos. R11 adicionado (mail-in-transaction, levantado no review do R1). Restam 9: R9, R6, R2, R5, R3, R7, R8, R10, R11.
