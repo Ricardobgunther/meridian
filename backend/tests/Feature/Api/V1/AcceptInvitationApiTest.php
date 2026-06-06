@@ -318,6 +318,26 @@ describe('POST /api/v1/invitations/accept/{token}', function (): void {
             ->assertJsonPath('code', 'invitation_email_mismatch');
     });
 
+    it('throttles the accept POST to 10/min/IP (named accept_invitation limiter — R5)', function (): void {
+        // Defence-in-depth: even an authenticated, email-matching caller is
+        // capped at 10 POSTs/min by IP. accept() is idempotent, so the first
+        // 10 return 200; the 11th must be rejected by the limiter (429)
+        // before reaching the controller.
+        ['token' => $token] = inviteWithToken(['email' => 'flooder@example.com']);
+        $joiner = User::factory()->create(['email' => 'flooder@example.com']);
+        $headers = actingAsSupabaseUser($joiner);
+
+        for ($i = 0; $i < 10; $i++) {
+            $this->withHeaders($headers)
+                ->postJson("/api/v1/invitations/accept/{$token}")
+                ->assertOk();
+        }
+
+        $this->withHeaders($headers)
+            ->postJson("/api/v1/invitations/accept/{$token}")
+            ->assertStatus(429);
+    });
+
     it('returns 404 invitation_not_found for malformed (too-short) tokens via the POST controller', function (): void {
         // The route regex requires at least 16 chars — anything shorter
         // 404s at the routing layer (no controller hit). 16-31 chars hit

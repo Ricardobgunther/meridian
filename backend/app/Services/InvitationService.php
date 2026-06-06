@@ -490,6 +490,17 @@ class InvitationService
     /** @throws InvitationRateLimitException */
     private function guardRateLimit(Organization $organization): void
     {
+        // Serialise issuance per-org so two parallel invite()/resend()
+        // transactions cannot both read the same sub-limit COUNT and both
+        // insert past it — follow-up R2. Locking the org ROW (not the
+        // invitations table) keeps this portable: on Postgres this emits
+        // `SELECT ... FOR UPDATE`, holding concurrent same-org txns at the
+        // COUNT below until we commit; on SQLite `lockForUpdate()` is an
+        // inoffensive no-op and writes are already globally serialised, so
+        // the race cannot occur there. (No advisory lock / LOCK TABLE —
+        // both would break the SQLite test suite.)
+        Organization::whereKey($organization->id)->lockForUpdate()->first();
+
         $since = Carbon::now()->subHours(self::RATE_LIMIT_WINDOW_HOURS);
 
         $count = Invitation::query()

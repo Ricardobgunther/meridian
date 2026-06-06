@@ -182,8 +182,12 @@ Route::prefix('v1/invitations/accept')
             ->name('v1.invitations.accept.show');
 
         // Auth-required: accept and decline. We attach supabase.auth
-        // individually here so the GET above stays public.
-        Route::middleware('supabase.auth')->group(function (): void {
+        // individually here so the GET above stays public. The named
+        // `accept_invitation` limiter (10/min/IP, registered in
+        // AppServiceProvider) layers on top of the 60/min prefix throttle —
+        // defence-in-depth for the token-consuming POSTs (R5); the tighter
+        // 10/min wins for them.
+        Route::middleware(['supabase.auth', 'throttle:accept_invitation'])->group(function (): void {
             Route::post('/{token}', [AcceptInvitationController::class, 'store'])
                 ->where('token', '[A-Za-z0-9_-]{16,128}')
                 ->name('v1.invitations.accept.store');
