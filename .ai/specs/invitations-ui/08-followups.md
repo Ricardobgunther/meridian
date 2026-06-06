@@ -40,21 +40,23 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 - **Risco:** `throttle:60,1` cobre GET preview + POST accept no mesmo bucket por IP. Com 256 bits de entropia o risco de brute-force é zero hoje, mas um throttle mais apertado no POST é defesa em profundidade.
 - **Proposta:** named limiter `accept_invitation` em `AppServiceProvider` (ex.: 10/min/IP no POST).
 
-### R6 — Payload de accept não devolve `your_role`
+### R6 — Payload de accept não devolve `your_role` ✅ RESOLVIDO/OBSOLETO (2026-06-06)
 - **Arquivo:** `backend/app/Http/Controllers/Api/V1/AcceptInvitationController.php:98-108`
 - **Agent:** `backend-agent`
 - **Risco:** frontend (`use-accept-invitation.ts:36`) precisa invalidar queries e re-buscar o role → round-trip extra após aceitar.
 - **Proposta:** incluir `your_role` no payload `organization.*`.
+- **Resolução:** ao reconciliar o doc com o código atual, o payload de accept **já devolve** `role` (`AcceptInvitationController.php:106`) e o tipo `AcceptResponse` (`frontend/lib/types/api.ts:173`) já o declara — o deliverable existe (nomeado `role`, não `your_role`). O "round-trip extra" residual é **intencional**: o hook faz `queryClient.invalidateQueries()` *inteiro* na troca de tenant (`use-accept-invitation.ts:34`), então semear só o role não evitaria o refetch. Sem código a fazer.
 
 ---
 
 ## Frontend
 
-### R7 — Literal `"convidado por "` fora do dicionário
+### R7 — Literal `"convidado por "` fora do dicionário ✅ RESOLVIDO (2026-06-06)
 - **Arquivo:** `frontend/app/(authenticated)/org/[slug]/settings/_components/PendingInvitationRow.tsx:52`
 - **Agent:** `frontend-agent`
 - **Risco:** viola "nunca colar literais" do header de `invitations.ts`. Quebra futura tradução EN.
 - **Proposta:** criar `t.invitations.list.invitedByLabel` (string fixa) e usar em conjunto com o tier visual já existente.
+- **Resolução:** adicionada a chave fixa `invitedByLabel: 'convidado por '` em `invitations.list` e usada no span `text-text-disabled`. Não reusou a função `invitedBy(name)` existente, pois ela colapsaria a estrutura bicolor de dois spans (label cinza + nome em itálico-se-inativo). Estrutura visual preservada.
 
 ### R8 — Sign-out via `window.location.assign` perde toasts
 - **Arquivo:** `frontend/app/invite/[token]/_components/SignOutButton.tsx:31`
@@ -84,17 +86,19 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 - **Risco:** `Mail::...->send()` roda síncrono dentro do `DB::transaction()`. Um SMTP lento/falho segura o lock da linha (agora mais relevante após o lock por-convite do R1) e pode reverter uma mudança de estado de intenção-commitada. Levantado pelo `review-agent` ao revisar R1 — pré-existente, não introduzido por R1.
 - **Proposta:** trocar para `Mail::...->queue()` ou dispatch-after-commit, depois que o worker de fila estiver no docker-compose (já há um `TODO(queue)` no método).
 
-### R12 — Ramo `status === 409` morto no `AcceptForm`
+### R12 — Ramo `status === 409` morto no `AcceptForm` ✅ RESOLVIDO (2026-06-06)
 - **Arquivo:** `frontend/app/invite/[token]/_components/AcceptForm.tsx:63-66`
 - **Agent:** `frontend-agent`
 - **Risco:** o fluxo de accept nunca retorna 409 (esse status só nasce em `invite()` via `InvitationAlreadyPendingException`). O ramo `setAlreadyUsed(true)`, o state `alreadyUsed` e a string `inlineErrorAlreadyUsed` são código defensivo inalcançável — confunde manutenção futura. Levantado pelo `review-agent` ao revisar R9; pré-existente, fora do escopo do R9.
 - **Proposta:** remover o ramo 409 + `useState alreadyUsed`, simplificar o bloco de alerta para usar só `inlineError`; checar se `inlineErrorAlreadyUsed` ainda tem consumidor antes de remover do dicionário.
+- **Resolução:** removidos o ramo 409, o state `alreadyUsed` e a simplificação do bloco de alerta para usar só `inlineError`. A string `inlineErrorAlreadyUsed` foi removida do dicionário (grep global confirmou: único consumidor era o `AcceptForm` + seu teste). Teste `it('renders the "already used" inline alert on 409', ...)` removido. Vitest verde (19 testes nos arquivos tocados), `tsc --noEmit` limpo.
 
 ---
 
 ## Não-funcionais
 
-- Total: **10 follow-ups** (6 backend, 3 frontend, 1 misto).
+- Total: **12 follow-ups** (6 backend, 5 frontend, 1 misto).
 - Nenhum é blocker para merge.
-- Sugestão de priorização: **R1 > R4 > R9 > R6 > R2 > R5 > R3 > R7 > R8 > R10**.
-- **Status (2026-05-29):** R1 ✅, R4 ✅ e R9 ✅ resolvidos. R11 e R12 adicionados (levantados nos reviews de R1 e R9). Restam 9: R6, R2, R5, R3, R7, R8, R10, R11, R12.
+- Sugestão de priorização (restantes): **R2 > R5 > R3 > R8 > R10 > R11**.
+- **Status (2026-05-29):** R1 ✅, R4 ✅ e R9 ✅ resolvidos. R11 e R12 adicionados (levantados nos reviews de R1 e R9).
+- **Status (2026-06-06):** R6 ✅ (obsoleto — payload já devolve `role`), R7 ✅ e R12 ✅ resolvidos. Restam **6**: R2, R5, R3, R8, R10, R11.

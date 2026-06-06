@@ -28,7 +28,6 @@ export function AcceptForm({ token, onStateChange }: AcceptFormProps) {
   const acceptMutation = useAcceptInvitation(token);
   const declineMutation = useDeclineInvitation(token);
   const [inlineError, setInlineError] = useState<string | null>(null);
-  const [alreadyUsed, setAlreadyUsed] = useState(false);
 
   const accepting = acceptMutation.isPending;
   const declining = declineMutation.isPending;
@@ -36,7 +35,6 @@ export function AcceptForm({ token, onStateChange }: AcceptFormProps) {
 
   async function handleAccept() {
     setInlineError(null);
-    setAlreadyUsed(false);
     try {
       await acceptMutation.mutateAsync();
     } catch (err) {
@@ -60,10 +58,6 @@ export function AcceptForm({ token, onStateChange }: AcceptFormProps) {
         onStateChange('revoked');
         return;
       }
-      if (parsed.status === 409) {
-        setAlreadyUsed(true);
-        return;
-      }
       setInlineError(parsed.message || t.invitations.accept.inlineErrorGeneric);
     }
   }
@@ -80,7 +74,7 @@ export function AcceptForm({ token, onStateChange }: AcceptFormProps) {
 
   return (
     <div className="flex flex-col gap-3">
-      {(inlineError || alreadyUsed) && (
+      {inlineError && (
         <div
           role="alert"
           className="rounded-sm border border-danger bg-danger-soft px-3 py-2 text-sm text-danger"
@@ -88,11 +82,7 @@ export function AcceptForm({ token, onStateChange }: AcceptFormProps) {
           <p className="font-medium">
             {t.invitations.accept.inlineErrorTitle}
           </p>
-          <p>
-            {alreadyUsed
-              ? t.invitations.accept.inlineErrorAlreadyUsed
-              : inlineError}
-          </p>
+          <p>{inlineError}</p>
         </div>
       )}
 

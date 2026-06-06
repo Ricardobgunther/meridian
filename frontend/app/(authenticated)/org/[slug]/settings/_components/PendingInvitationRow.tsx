@@ -49,7 +49,7 @@ export function PendingInvitationRow({
                 inactiveInviter ? t.invitations.list.inviterNoLongerMember : undefined
               }
             >
-              <span className="text-text-disabled">convidado por </span>
+              <span className="text-text-disabled">{t.invitations.list.invitedByLabel}</span>
               <span className={inactiveInviter ? 'italic' : undefined}>
                 {inviterName}
               </span>

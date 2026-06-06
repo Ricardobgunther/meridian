@@ -17,6 +17,7 @@ export const invitations = {
     columnExpires: 'Expira em',
     columnActions: 'Ações',
     invitedBy: (name: string) => `convidado por ${name}`,
+    invitedByLabel: 'convidado por ',
     inviterNoLongerMember: 'Não é mais membro.',
     expiresInTooltip: (fullDate: string) => `Expira em ${fullDate}`,
     expiresUrgent: 'Expira em breve',
@@ -104,7 +105,6 @@ export const invitations = {
     declineSuccessAnnouncement: 'Convite recusado.',
     inlineErrorTitle: 'Não foi possível concluir',
     inlineErrorGeneric: 'Tente novamente em instantes.',
-    inlineErrorAlreadyUsed: 'Este convite já foi usado.',
 
     anonTitlePrefix: 'Você foi convidado a entrar em',
     anonBody: (email: string) =>

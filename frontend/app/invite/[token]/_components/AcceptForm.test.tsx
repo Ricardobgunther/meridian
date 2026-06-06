@@ -191,22 +191,6 @@ describe('AcceptForm — error→state transitions', () => {
     });
   });
 
-  it('renders the "already used" inline alert on 409', async () => {
-    acceptMutateAsync.mockRejectedValueOnce(
-      buildApiError({ status: 409, code: 'unknown', message: 'already' }),
-    );
-    const user = userEvent.setup();
-    renderForm();
-
-    await user.click(
-      screen.getByRole('button', { name: t.invitations.accept.accept }),
-    );
-
-    expect(
-      await screen.findByText(t.invitations.accept.inlineErrorAlreadyUsed),
-    ).toBeInTheDocument();
-  });
-
   it('renders a generic inline error for an unmapped server error', async () => {
     acceptMutateAsync.mockRejectedValueOnce(
       buildApiError({ status: 500, code: 'server', message: 'oops' }),
