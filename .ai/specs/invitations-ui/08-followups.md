@@ -22,11 +22,12 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 - **Proposta:** `LOCK TABLE invitations IN SHARE ROW EXCLUSIVE MODE` ou contagem com `FOR UPDATE` no row do organization.
 - **Resolução:** lock na **linha da organization** no início de `guardRateLimit()`, antes do COUNT: `Organization::whereKey($organization->id)->lockForUpdate()->first()`. Serializa as transações `invite()`/`resend()` da mesma org até o commit, então duas requests concorrentes não conseguem ambas ler o mesmo COUNT sub-limite e inserir além dele. **Portabilidade:** no Postgres emite `SELECT ... FOR UPDATE`; no SQLite o `lockForUpdate()` é no-op inofensivo e as escritas já são serializadas globalmente, então a race não existe lá. Evitado de propósito `pg_advisory_xact_lock`/`LOCK TABLE` (quebrariam a suíte SQLite). A proteção contra a race em si só é verificável em Postgres (concorrência real); em SQLite garantimos apenas a preservação do comportamento — o teste unitário existente continua barrando o 21º convite (`tests/Unit/InvitationServiceTest.php`).
 
-### R3 — `InvitationService` excede limite de 300 linhas
+### R3 — `InvitationService` excede limite de 300 linhas ✅ RESOLVIDO (2026-06-07)
 - **Arquivo:** `backend/app/Services/InvitationService.php` (481 linhas brutas, ~304 efetivas)
 - **Agent:** `backend-agent`
 - **Risco:** viola `.ai/context/conventions.md`. Funcionalidade está coesa, mas há espaço para extrair.
 - **Proposta:** extrair `InvitationGuards` (já-membro / já-pending / rate-limit) ou `InvitationTokenIssuer` (`generateRawToken` / `hashToken` / `findByToken*`).
+- **Resolução:** extraído o colaborador **`InvitationTokenIssuer`** (`app/Services/InvitationTokenIssuer.php`) com `generate()` / `hash()` / `find()` / `findForUpdate()` — a opção mais self-contained (cripto + lookup, sem regra de domínio nem semântica de transação, ao contrário dos guards). Injetado no `InvitationService` via construtor (classe concreta, autowire do container — sem binding). Os métodos privados `generateRawToken`/`hashToken`/`findByToken`/`findByTokenForUpdate` viraram chamadas `$this->tokens->*`. **Efetivas: 318 → 294** (< 300). Refactor preservando comportamento 1:1 — suíte completa **245/245 verde** (235 + 10 do novo `InvitationTokenIssuerTest`, que fixa o contrato do colaborador agora que é API pública: formato base64url de 43 chars, hash SHA-256 determinístico, `find` ignora soft-deleted, `findForUpdate` lança `InvitationNotFoundException`).
 
 ### R4 — Cross-tenant invitation retorna 403 em vez de 404 ✅ RESOLVIDO (2026-05-29)
 - **Arquivo:** `backend/routes/api.php`
@@ -112,6 +113,7 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 
 - Total: **13 follow-ups** (6 backend, 5 frontend, 1 misto, 1 infra).
 - Nenhum é blocker para merge.
-- Sugestão de priorização (restantes): **R3 > R8 > R10 > R11**.
+- Sugestão de priorização (restantes): **R8 > R10 > R11**.
 - **Status (2026-05-29):** R1 ✅, R4 ✅ e R9 ✅ resolvidos. R11 e R12 adicionados (levantados nos reviews de R1 e R9).
 - **Status (2026-06-06):** R6 ✅ (obsoleto — payload já devolve `role`), R7 ✅ e R12 ✅ resolvidos. Depois, R2 ✅ (lock de linha da org, portável Postgres/SQLite) e R5 ✅ (named limiter `accept_invitation` 10/min/IP no POST) resolvidos. R13 adicionado (trusted proxies, levantado no review de R5) e em seguida ✅ resolvido (config dirigida por env, default seguro). Restam **4**: R3, R8, R10, R11.
+- **Status (2026-06-07):** R3 ✅ resolvido (extraído `InvitationTokenIssuer`; service 318 → 294 efetivas; 245/245 verde). Restam **3**: R8, R10, R11 (todos frontend/observabilidade).

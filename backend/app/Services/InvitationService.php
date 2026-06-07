@@ -28,11 +28,12 @@ use Illuminate\Support\Str;
  * Use cases for the {@see Invitation} aggregate — ADR-013.
  *
  * Every state-changing public method runs inside `DB::transaction()` so
- * partial state never leaks. The raw token is generated here, passed
- * once to the mailable, and never persisted — only its SHA-256 digest
- * lives in `token_hash`. Rate limit: 20 issuances per rolling 24h per
- * org, counted inside the transaction so concurrent callers cannot
- * both squeak past. Email delivery is synchronous (no queue yet).
+ * partial state never leaks. Token mechanics (mint / hash / lookup) live
+ * in {@see InvitationTokenIssuer}; the raw token is never persisted —
+ * only its SHA-256 digest lives in `token_hash`. Rate limit: 20 issuances
+ * per rolling 24h per org, counted inside the transaction so concurrent
+ * callers cannot both squeak past. Email delivery is synchronous (no
+ * queue yet).
  */
 class InvitationService
 {
@@ -51,6 +52,10 @@ class InvitationService
      * the invite spec (`00-overview.md` §7.4).
      */
     private const RESEND_COOLDOWN_SECONDS = 60;
+
+    public function __construct(
+        private readonly InvitationTokenIssuer $tokens,
+    ) {}
 
     /**
      * @return array{invitation: Invitation, token: string}
@@ -72,12 +77,12 @@ class InvitationService
             $this->guardAlreadyMember($organization, $normalised);
             $this->guardAlreadyPending($organization, $normalised);
 
-            $token = $this->generateRawToken();
+            $token = $this->tokens->generate();
             $invitation = Invitation::create([
                 'organization_id' => $organization->id,
                 'email' => $normalised,
                 'role' => $role->value,
-                'token_hash' => $this->hashToken($token),
+                'token_hash' => $this->tokens->hash($token),
                 'status' => InvitationStatus::Pending->value,
                 'expires_at' => Carbon::now()->addDays(self::TTL_DAYS),
                 'invited_by_user_id' => $inviter->id,
@@ -118,7 +123,7 @@ class InvitationService
     public function resend(Invitation $invitation): array
     {
         if ($invitation->status !== InvitationStatus::Pending) {
-            throw new InvitationNotPendingException();
+            throw new InvitationNotPendingException;
         }
 
         return DB::transaction(function () use ($invitation): array {
@@ -131,7 +136,7 @@ class InvitationService
             // Re-check after the lock — a parallel accept/revoke
             // between policy resolution and this transaction is caught.
             if ($fresh->status !== InvitationStatus::Pending) {
-                throw new InvitationNotPendingException();
+                throw new InvitationNotPendingException;
             }
 
             $this->guardResendCooldown($fresh);
@@ -139,8 +144,8 @@ class InvitationService
             $organization = $fresh->organization()->firstOrFail();
             $this->guardRateLimit($organization);
 
-            $token = $this->generateRawToken();
-            $fresh->token_hash = $this->hashToken($token);
+            $token = $this->tokens->generate();
+            $fresh->token_hash = $this->tokens->hash($token);
             $fresh->expires_at = Carbon::now()->addDays(self::TTL_DAYS);
             $fresh->last_resent_at = Carbon::now();
             $fresh->save();
@@ -173,7 +178,7 @@ class InvitationService
         $this->maybePromoteExpired($rawToken);
 
         return DB::transaction(function () use ($rawToken, $acceptor): Membership {
-            $invitation = $this->findByTokenForUpdate($rawToken);
+            $invitation = $this->tokens->findForUpdate($rawToken);
             $this->guardAcceptable($invitation, $acceptor);
 
             if ($invitation->status === InvitationStatus::Accepted) {
@@ -183,7 +188,7 @@ class InvitationService
 
                 // A different user already consumed this token — the
                 // link is no longer usable for anyone else.
-                throw new InvitationRevokedException();
+                throw new InvitationRevokedException;
             }
 
             $membership = $this->upsertMembership($invitation, $acceptor);
@@ -211,14 +216,14 @@ class InvitationService
         $this->maybePromoteExpired($rawToken);
 
         DB::transaction(function () use ($rawToken, $acceptor): void {
-            $invitation = $this->findByTokenForUpdate($rawToken);
+            $invitation = $this->tokens->findForUpdate($rawToken);
 
             if ($invitation->status !== InvitationStatus::Pending) {
                 return;
             }
 
             if (Str::lower(trim($acceptor->email)) !== $invitation->email) {
-                throw new InvitationEmailMismatchException();
+                throw new InvitationEmailMismatchException;
             }
 
             $invitation->status = InvitationStatus::Revoked;
@@ -236,7 +241,7 @@ class InvitationService
      */
     public function previewByToken(string $rawToken): array
     {
-        $invitation = $this->findByToken($rawToken);
+        $invitation = $this->tokens->find($rawToken);
 
         if ($invitation === null) {
             return ['status' => 'not_found'];
@@ -282,40 +287,6 @@ class InvitationService
         return Str::lower(trim($email));
     }
 
-    /** 32 bytes, base64url — 43 chars no padding, URL-safe. */
-    private function generateRawToken(): string
-    {
-        return rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
-    }
-
-    private function hashToken(string $rawToken): string
-    {
-        return hash('sha256', $rawToken);
-    }
-
-    private function findByToken(string $rawToken): ?Invitation
-    {
-        return Invitation::query()
-            ->where('token_hash', $this->hashToken($rawToken))
-            ->whereNull('deleted_at')
-            ->first();
-    }
-
-    private function findByTokenForUpdate(string $rawToken): Invitation
-    {
-        $invitation = Invitation::query()
-            ->where('token_hash', $this->hashToken($rawToken))
-            ->whereNull('deleted_at')
-            ->lockForUpdate()
-            ->first();
-
-        if ($invitation === null) {
-            throw new InvitationNotFoundException();
-        }
-
-        return $invitation;
-    }
-
     /**
      * Reject revoked / expired / email-mismatch. `accepted` is handled
      * by the caller for idempotency.
@@ -323,18 +294,18 @@ class InvitationService
     private function guardAcceptable(Invitation $invitation, User $acceptor): void
     {
         if ($invitation->status === InvitationStatus::Revoked) {
-            throw new InvitationRevokedException();
+            throw new InvitationRevokedException;
         }
 
         if (
             $invitation->status === InvitationStatus::Expired
             || ($invitation->status === InvitationStatus::Pending && $invitation->expires_at->isPast())
         ) {
-            throw new InvitationExpiredException();
+            throw new InvitationExpiredException;
         }
 
         if (Str::lower(trim($acceptor->email)) !== $invitation->email) {
-            throw new InvitationEmailMismatchException();
+            throw new InvitationEmailMismatchException;
         }
     }
 
@@ -352,7 +323,7 @@ class InvitationService
      */
     private function maybePromoteExpired(string $rawToken): void
     {
-        $invitation = $this->findByToken($rawToken);
+        $invitation = $this->tokens->find($rawToken);
         if (
             $invitation === null
             || $invitation->status !== InvitationStatus::Pending
@@ -441,7 +412,7 @@ class InvitationService
             ->exists();
 
         if ($isMember) {
-            throw new InvitationAlreadyMemberException();
+            throw new InvitationAlreadyMemberException;
         }
     }
 
@@ -461,7 +432,7 @@ class InvitationService
             ->exists();
 
         if ($hasPending) {
-            throw new InvitationAlreadyPendingException();
+            throw new InvitationAlreadyPendingException;
         }
     }
 
@@ -483,7 +454,7 @@ class InvitationService
             $lastResentAt !== null
             && $lastResentAt->copy()->addSeconds(self::RESEND_COOLDOWN_SECONDS)->isFuture()
         ) {
-            throw new InvitationRateLimitException();
+            throw new InvitationRateLimitException;
         }
     }
 
@@ -509,7 +480,7 @@ class InvitationService
             ->count();
 
         if ($count >= self::RATE_LIMIT_MAX) {
-            throw new InvitationRateLimitException();
+            throw new InvitationRateLimitException;
         }
     }
 

@@ -37,7 +37,7 @@ class AcceptInvitationController extends Controller
 {
     /**
      * Regex matching the base64url alphabet used by
-     * {@see InvitationService::generateRawToken()} — 32 raw bytes encoded
+     * {@see \App\Services\InvitationTokenIssuer::generate()} — 32 raw bytes encoded
      * as 43 chars in practice. We accept a wider 32-128 band as defence
      * in depth: the route-level `where()` is the first gate (rejects
      * <16 chars at the router); this controller-level check is a tighter
