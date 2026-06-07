@@ -99,11 +99,12 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 
 ## Infra
 
-### R13 — Trusted proxies não configurados → throttle por IP colapsa atrás de proxy
+### R13 — Trusted proxies não configurados → throttle por IP colapsa atrás de proxy ✅ RESOLVIDO (2026-06-06)
 - **Arquivo:** `backend/bootstrap/app.php`
 - **Agent:** `devops-agent`
 - **Risco:** não há `trustProxies` configurado. Em produção atrás de Nginx/load balancer, `$request->ip()` retorna o IP do *proxy*, não do cliente, então **todos os clientes compartilham o mesmo bucket** de qualquer throttle por IP — `throttle:60,1` E o novo `accept_invitation` (10/min) do R5. Resultado: o controle enfraquece (um cliente esgota o limite para todos) e gera falsos 429. Levantado pelo `review-agent` ao revisar R5; pré-existente — afeta todo throttle por IP do projeto, não só o accept-flow.
 - **Proposta:** configurar trusted proxies em `bootstrap/app.php` (`->withMiddleware(fn ($m) => $m->trustProxies(at: '*'))` ou range específico do load balancer) antes do deploy. Coordenar com o header real que o Nginx repassa (`X-Forwarded-For`).
+- **Resolução:** configuração **dirigida por env** no `withMiddleware()` de `bootstrap/app.php`, porque o projeto é um starter template reutilizável e o range do LB é específico de cada deploy (nunca hardcodado). `$middleware->trustProxies(at: ..., headers: ...)` lê `env('TRUSTED_PROXIES')`: vazio/null → `null` (não confia em nenhum proxy — **default seguro** que preserva 1:1 o comportamento atual, `ip()` = conexão direta); `'*'` → confia em qualquer proxy (apropriado só quando o app é exclusivamente alcançável por um LB único que é o único ingress); CSV de CIDRs → `explode(',', ...)` para os ranges específicos. `headers` usa o conjunto forwarded padrão do Nginx (`X_FORWARDED_FOR|HOST|PORT|PROTO`), com `HEADER_X_FORWARDED_AWS_ELB` documentado em comentário como alternativa para ELB. Comentário no bloco inclui o aviso de segurança: confiar em `*` sem o app estar de fato atrás de um único proxy permite spoofing de `X-Forwarded-For`. `TRUSTED_PROXIES=` (vazio) adicionado ao `.env.example` com os valores aceitos documentados; `.env` real intocado. **Ressalva (Forge/Vapor):** com `at: null` o framework auto-promove o trust para `*` se o host terminar em `.on-forge.com`/`.on-vapor.com` ou sob `laravel_cloud()`; não afeta este projeto (deploy Docker/Nginx), mas quem rodar o starter nessas plataformas com `TRUSTED_PROXIES` vazio deve setar um range explícito. **Sem regressão:** com o default vazio nenhum proxy é confiável — suíte backend 235/235 verde (227 + 8 do novo `TrustedProxiesTest`).
 
 ---
 
@@ -111,6 +112,6 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 
 - Total: **13 follow-ups** (6 backend, 5 frontend, 1 misto, 1 infra).
 - Nenhum é blocker para merge.
-- Sugestão de priorização (restantes): **R13 > R3 > R8 > R10 > R11**.
+- Sugestão de priorização (restantes): **R3 > R8 > R10 > R11**.
 - **Status (2026-05-29):** R1 ✅, R4 ✅ e R9 ✅ resolvidos. R11 e R12 adicionados (levantados nos reviews de R1 e R9).
-- **Status (2026-06-06):** R6 ✅ (obsoleto — payload já devolve `role`), R7 ✅ e R12 ✅ resolvidos. Depois, R2 ✅ (lock de linha da org, portável Postgres/SQLite) e R5 ✅ (named limiter `accept_invitation` 10/min/IP no POST) resolvidos. R13 adicionado (trusted proxies, levantado no review de R5). Restam **5**: R13, R3, R8, R10, R11.
+- **Status (2026-06-06):** R6 ✅ (obsoleto — payload já devolve `role`), R7 ✅ e R12 ✅ resolvidos. Depois, R2 ✅ (lock de linha da org, portável Postgres/SQLite) e R5 ✅ (named limiter `accept_invitation` 10/min/IP no POST) resolvidos. R13 adicionado (trusted proxies, levantado no review de R5) e em seguida ✅ resolvido (config dirigida por env, default seguro). Restam **4**: R3, R8, R10, R11.
