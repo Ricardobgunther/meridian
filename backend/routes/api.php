@@ -38,7 +38,7 @@ Route::bind('member', function (string $id, $route): Membership {
     $orgId = match (true) {
         $org instanceof Organization => $org->id,
         is_string($org) && $org !== '' => $org,
-        default => throw new \RuntimeException(
+        default => throw new RuntimeException(
             'Route bind for {member} requires an {organization} parameter; '
             .'the route is misconfigured.'
         ),
@@ -170,6 +170,13 @@ Route::prefix('v1')
 | accept/decline), but they do NOT carry the `X-Organization-Id` header
 | because the invitee has no org context yet.
 |
+| The token travels in the `X-Invitation-Token` HEADER, never in the path
+| (follow-up R10): a path-param is a bearer credential captured by every
+| access log / APM by default, while a header is not. The controller reads
+| and shape-checks the header. The route paths are now static, so the
+| GET preview MUST be non-cacheable (the controller sends Cache-Control:
+| no-store) or an intermediary keyed on URL alone would cross-serve tokens.
+|
 */
 Route::prefix('v1/invitations/accept')
     ->middleware('throttle:60,1')
@@ -177,8 +184,7 @@ Route::prefix('v1/invitations/accept')
         // Public preview — does NOT consume the token. Returns 200 with
         // a discriminated `status` payload for every case (including
         // not_found / expired) to flatten the enumeration surface.
-        Route::get('/{token}', [AcceptInvitationController::class, 'show'])
-            ->where('token', '[A-Za-z0-9_-]{16,128}')
+        Route::get('/', [AcceptInvitationController::class, 'show'])
             ->name('v1.invitations.accept.show');
 
         // Auth-required: accept and decline. We attach supabase.auth
@@ -188,12 +194,10 @@ Route::prefix('v1/invitations/accept')
         // defence-in-depth for the token-consuming POSTs (R5); the tighter
         // 10/min wins for them.
         Route::middleware(['supabase.auth', 'throttle:accept_invitation'])->group(function (): void {
-            Route::post('/{token}', [AcceptInvitationController::class, 'store'])
-                ->where('token', '[A-Za-z0-9_-]{16,128}')
+            Route::post('/', [AcceptInvitationController::class, 'store'])
                 ->name('v1.invitations.accept.store');
 
-            Route::post('/{token}/decline', [AcceptInvitationController::class, 'destroy'])
-                ->where('token', '[A-Za-z0-9_-]{16,128}')
+            Route::post('/decline', [AcceptInvitationController::class, 'destroy'])
                 ->name('v1.invitations.accept.decline');
         });
     });

@@ -10,7 +10,8 @@ export function invitationPreviewQueryKey(token: string) {
 }
 
 /**
- * Preview público do convite (GET /api/v1/invitations/accept/{token}).
+ * Preview público do convite (GET /api/v1/invitations/accept, token no
+ * header X-Invitation-Token — R10).
  *
  * - `skipOrgHeader`: o token é o escopo; nenhum header de org.
  * - `redirectOnAuthError: false`: a página `/invite/[token]` é pública,
@@ -25,14 +26,14 @@ export function useInvitationPreview(token: string | null | undefined) {
     queryKey: invitationPreviewQueryKey(token ?? 'none'),
     enabled: Boolean(token),
     queryFn: ({ signal }) =>
-      apiFetch<AcceptPreviewResponse>(
-        `/api/v1/invitations/accept/${token}`,
-        {
-          signal,
-          skipOrgHeader: true,
-          redirectOnAuthError: false,
-        },
-      ),
+      // Token in the X-Invitation-Token header, not the path (R10). The
+      // `enabled` gate above guarantees `token` is a non-empty string here.
+      apiFetch<AcceptPreviewResponse>('/api/v1/invitations/accept', {
+        signal,
+        headers: { 'X-Invitation-Token': token as string },
+        skipOrgHeader: true,
+        redirectOnAuthError: false,
+      }),
     staleTime: 0,
     gcTime: 60_000,
   });

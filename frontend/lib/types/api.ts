@@ -140,7 +140,8 @@ export interface InvitationsListResponse {
 }
 
 /**
- * Preview público (GET /api/v1/invitations/accept/{token}).
+ * Preview público (GET /api/v1/invitations/accept, token no header
+ * X-Invitation-Token — R10).
  *
  * O backend retorna `{ data: <payload> }`; o payload é um union discriminado
  * por `status`. Status `pending` carrega os detalhes; os demais são
@@ -166,7 +167,7 @@ export interface AcceptPreviewResponse {
   data: AcceptPreviewPayload;
 }
 
-/** POST /api/v1/invitations/accept/{token} — sucesso. */
+/** POST /api/v1/invitations/accept (token no header X-Invitation-Token) — sucesso. */
 export interface AcceptResponse {
   data: {
     membership: Membership;

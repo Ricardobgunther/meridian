@@ -25,10 +25,12 @@ export function useAcceptInvitation(token: string) {
 
   return useMutation<AcceptResponse, unknown, void>({
     mutationFn: () =>
-      apiFetch<AcceptResponse>(
-        `/api/v1/invitations/accept/${token}`,
-        { method: 'POST', skipOrgHeader: true },
-      ),
+      // Token in the X-Invitation-Token header, not the path (R10).
+      apiFetch<AcceptResponse>('/api/v1/invitations/accept', {
+        method: 'POST',
+        headers: { 'X-Invitation-Token': token },
+        skipOrgHeader: true,
+      }),
     onSuccess: (resp) => {
       const org = resp.data.organization;
       queryClient.invalidateQueries();

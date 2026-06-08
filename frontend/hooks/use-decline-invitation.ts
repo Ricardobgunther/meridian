@@ -17,8 +17,10 @@ export function useDeclineInvitation(token: string) {
 
   return useMutation<void, unknown, void>({
     mutationFn: () =>
-      apiFetch<void>(`/api/v1/invitations/accept/${token}/decline`, {
+      // Token in the X-Invitation-Token header, not the path (R10).
+      apiFetch<void>('/api/v1/invitations/accept/decline', {
         method: 'POST',
+        headers: { 'X-Invitation-Token': token },
         skipOrgHeader: true,
       }),
     onSuccess: () => {

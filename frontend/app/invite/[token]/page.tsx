@@ -77,9 +77,15 @@ export default async function InvitePage({ params }: PageProps) {
 
 async function loadPreview(token: string) {
   try {
+    // Token goes in the X-Invitation-Token header, never in the URL path
+    // (R10) — a path-param is a bearer credential that lands in access logs.
     const res = await apiFetch<AcceptPreviewResponse>(
-      `/api/v1/invitations/accept/${encodeURIComponent(token)}`,
-      { skipOrgHeader: true, redirectOnAuthError: false },
+      '/api/v1/invitations/accept',
+      {
+        headers: { 'X-Invitation-Token': token },
+        skipOrgHeader: true,
+        redirectOnAuthError: false,
+      },
     );
     return res.data;
   } catch {

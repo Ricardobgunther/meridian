@@ -16,15 +16,20 @@ use Illuminate\Support\Carbon;
 |--------------------------------------------------------------------------
 |
 | Covers:
-|   GET    /api/v1/invitations/accept/{token}          (public preview)
-|   POST   /api/v1/invitations/accept/{token}          (auth required)
-|   POST   /api/v1/invitations/accept/{token}/decline  (auth required)
+|   GET    /api/v1/invitations/accept          (public preview)
+|   POST   /api/v1/invitations/accept          (auth required)
+|   POST   /api/v1/invitations/accept/decline  (auth required)
 |
-| The preview MUST be flat-discriminated (200 with `status` payload) for
-| every non-malformed token. The POSTs use the domain-exception envelope
-| `{ error, code }` with the spec'd status codes.
+| The token travels in the `X-Invitation-Token` HEADER, never in the path
+| (follow-up R10). The preview MUST be flat-discriminated (200 with a
+| `status` payload) for every token — well-shaped, malformed or missing —
+| and carry `Cache-Control: no-store` since the path is now static. The
+| POSTs use the domain-exception envelope `{ error, code }` with the spec'd
+| status codes.
 |
 */
+
+const INVITE_TOKEN_HEADER = 'X-Invitation-Token';
 
 beforeEach(function (): void {
     config([
@@ -59,7 +64,7 @@ function inviteWithToken(array $attrs = []): array
 
 // ─── Show (public preview) ───────────────────────────────────────────────────
 
-describe('GET /api/v1/invitations/accept/{token} (public preview)', function (): void {
+describe('GET /api/v1/invitations/accept (public preview)', function (): void {
     it('returns status=pending with org payload for a fresh invitation — no auth required', function (): void {
         $org = Organization::factory()->create(['name' => 'Acme Inc.', 'slug' => 'acme']);
         $inviter = User::factory()->create(['name' => 'Alice Admin']);
@@ -70,8 +75,14 @@ describe('GET /api/v1/invitations/accept/{token} (public preview)', function ():
             'invited_by_user_id' => $inviter->id,
         ]);
 
-        $response = $this->getJson("/api/v1/invitations/accept/{$token}")
+        $response = $this->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->getJson('/api/v1/invitations/accept')
             ->assertOk();
+
+        // Static path → the preview must never be cached by an intermediary,
+        // or one token's payload would be cross-served. Symfony normalises
+        // `no-store` to `no-store, private`, so assert containment.
+        expect($response->headers->get('Cache-Control'))->toContain('no-store');
 
         $response->assertJsonPath('data.status', 'pending');
         $response->assertJsonPath('data.email', 'invitee@example.com');
@@ -87,7 +98,9 @@ describe('GET /api/v1/invitations/accept/{token} (public preview)', function ():
     it('does NOT consume the token on preview', function (): void {
         ['token' => $token, 'invitation' => $invite] = inviteWithToken();
 
-        $this->getJson("/api/v1/invitations/accept/{$token}")->assertOk();
+        $this->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->getJson('/api/v1/invitations/accept')
+            ->assertOk();
 
         expect($invite->fresh()->status)->toBe(InvitationStatus::Pending);
     });
@@ -99,7 +112,8 @@ describe('GET /api/v1/invitations/accept/{token} (public preview)', function ():
             'revoked_at' => Carbon::now(),
         ]);
 
-        $response = $this->getJson("/api/v1/invitations/accept/{$token}")
+        $response = $this->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->getJson('/api/v1/invitations/accept')
             ->assertOk();
 
         $response->assertJsonPath('data.status', 'revoked');
@@ -114,7 +128,8 @@ describe('GET /api/v1/invitations/accept/{token} (public preview)', function ():
             'accepted_at' => Carbon::now(),
         ]);
 
-        $this->getJson("/api/v1/invitations/accept/{$token}")
+        $this->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->getJson('/api/v1/invitations/accept')
             ->assertOk()
             ->assertJsonPath('data.status', 'accepted');
     });
@@ -124,7 +139,8 @@ describe('GET /api/v1/invitations/accept/{token} (public preview)', function ():
             'expires_at' => Carbon::now()->subDay(),
         ]);
 
-        $this->getJson("/api/v1/invitations/accept/{$token}")
+        $this->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->getJson('/api/v1/invitations/accept')
             ->assertOk()
             ->assertJsonPath('data.status', 'expired');
 
@@ -135,26 +151,40 @@ describe('GET /api/v1/invitations/accept/{token} (public preview)', function ():
     it('returns status=not_found for an unknown but well-shaped token', function (): void {
         $stranger = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq'; // 43 chars, base64url alphabet
 
-        $this->getJson("/api/v1/invitations/accept/{$stranger}")
+        $this->withHeader(INVITE_TOKEN_HEADER, $stranger)
+            ->getJson('/api/v1/invitations/accept')
             ->assertOk()
             ->assertJsonPath('data.status', 'not_found');
     });
 
-    it('returns 404 (route regex miss) for a token shorter than 16 chars', function (): void {
-        $this->getJson('/api/v1/invitations/accept/tooshort')
-            ->assertStatus(404);
+    it('returns status=not_found (200) for a too-short token in the header', function (): void {
+        // No route regex anymore — the controller shape-check (>=32 chars)
+        // rejects it and the flat preview surface answers not_found.
+        $this->withHeader(INVITE_TOKEN_HEADER, 'tooshort')
+            ->getJson('/api/v1/invitations/accept')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'not_found');
     });
 
-    it('returns 404 (route regex miss) for tokens containing illegal characters', function (): void {
-        // `$` is outside the base64url alphabet — route `where` filter rejects.
-        $this->getJson('/api/v1/invitations/accept/contains$dollar$sign$here$abc')
-            ->assertStatus(404);
+    it('returns status=not_found (200) for a header with illegal characters', function (): void {
+        // `$` is outside the base64url alphabet — the controller shape-check
+        // rejects it before any hash/lookup.
+        $this->withHeader(INVITE_TOKEN_HEADER, 'contains$dollar$sign$here$abcdefghij')
+            ->getJson('/api/v1/invitations/accept')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'not_found');
+    });
+
+    it('returns status=not_found (200) when the token header is missing entirely', function (): void {
+        $this->getJson('/api/v1/invitations/accept')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'not_found');
     });
 });
 
 // ─── Store (accept) ──────────────────────────────────────────────────────────
 
-describe('POST /api/v1/invitations/accept/{token}', function (): void {
+describe('POST /api/v1/invitations/accept', function (): void {
     it('consumes the token, creates an active membership, returns the org payload', function (): void {
         $org = Organization::factory()->create(['name' => 'Acme', 'slug' => 'acme']);
         ['token' => $token, 'invitation' => $invite] = inviteWithToken([
@@ -165,7 +195,8 @@ describe('POST /api/v1/invitations/accept/{token}', function (): void {
         $joiner = User::factory()->create(['email' => 'joiner@example.com']);
 
         $response = $this->withHeaders(actingAsSupabaseUser($joiner))
-            ->postJson("/api/v1/invitations/accept/{$token}")
+            ->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->postJson('/api/v1/invitations/accept')
             ->assertOk();
 
         $response->assertJsonPath('data.role', 'admin');
@@ -194,7 +225,8 @@ describe('POST /api/v1/invitations/accept/{token}', function (): void {
         $joiner = User::factory()->create(['email' => 'NORMAL@Example.COM']);
 
         $this->withHeaders(actingAsSupabaseUser($joiner))
-            ->postJson("/api/v1/invitations/accept/{$token}")
+            ->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->postJson('/api/v1/invitations/accept')
             ->assertOk();
 
         expect($invite->fresh()->status)->toBe(InvitationStatus::Accepted);
@@ -203,7 +235,8 @@ describe('POST /api/v1/invitations/accept/{token}', function (): void {
     it('returns 401 without a Supabase JWT', function (): void {
         ['token' => $token] = inviteWithToken();
 
-        $this->postJson("/api/v1/invitations/accept/{$token}")
+        $this->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->postJson('/api/v1/invitations/accept')
             ->assertStatus(401);
     });
 
@@ -214,7 +247,8 @@ describe('POST /api/v1/invitations/accept/{token}', function (): void {
         $wrongUser = User::factory()->create(['email' => 'somebody-else@example.com']);
 
         $this->withHeaders(actingAsSupabaseUser($wrongUser))
-            ->postJson("/api/v1/invitations/accept/{$token}")
+            ->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->postJson('/api/v1/invitations/accept')
             ->assertStatus(403)
             ->assertJsonPath('code', 'invitation_email_mismatch')
             ->assertJsonPath('error', 'Este convite foi enviado para outro email.');
@@ -236,7 +270,8 @@ describe('POST /api/v1/invitations/accept/{token}', function (): void {
         $joiner = User::factory()->create();
 
         $this->withHeaders(actingAsSupabaseUser($joiner))
-            ->postJson("/api/v1/invitations/accept/{$token}")
+            ->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->postJson('/api/v1/invitations/accept')
             ->assertStatus(410)
             ->assertJsonPath('code', 'invitation_revoked');
     });
@@ -249,7 +284,8 @@ describe('POST /api/v1/invitations/accept/{token}', function (): void {
         $joiner = User::factory()->create(['email' => 'late@example.com']);
 
         $this->withHeaders(actingAsSupabaseUser($joiner))
-            ->postJson("/api/v1/invitations/accept/{$token}")
+            ->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->postJson('/api/v1/invitations/accept')
             ->assertStatus(410)
             ->assertJsonPath('code', 'invitation_expired');
 
@@ -262,7 +298,8 @@ describe('POST /api/v1/invitations/accept/{token}', function (): void {
         $user = User::factory()->create();
 
         $this->withHeaders(actingAsSupabaseUser($user))
-            ->postJson("/api/v1/invitations/accept/{$stranger}")
+            ->withHeader(INVITE_TOKEN_HEADER, $stranger)
+            ->postJson('/api/v1/invitations/accept')
             ->assertStatus(404)
             ->assertJsonPath('code', 'invitation_not_found');
     });
@@ -274,12 +311,14 @@ describe('POST /api/v1/invitations/accept/{token}', function (): void {
         $joiner = User::factory()->create(['email' => 'idem@example.com']);
 
         $first = $this->withHeaders(actingAsSupabaseUser($joiner))
-            ->postJson("/api/v1/invitations/accept/{$token}")
+            ->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->postJson('/api/v1/invitations/accept')
             ->assertOk();
         $membershipId = $first->json('data.membership.id');
 
         $second = $this->withHeaders(actingAsSupabaseUser($joiner))
-            ->postJson("/api/v1/invitations/accept/{$token}")
+            ->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->postJson('/api/v1/invitations/accept')
             ->assertOk();
 
         expect($second->json('data.membership.id'))->toBe($membershipId);
@@ -304,12 +343,14 @@ describe('POST /api/v1/invitations/accept/{token}', function (): void {
         $first = User::factory()->create(['email' => 'consumer@example.com']);
 
         $this->withHeaders(actingAsSupabaseUser($first))
-            ->postJson("/api/v1/invitations/accept/{$token}")
+            ->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->postJson('/api/v1/invitations/accept')
             ->assertOk();
 
         $someoneElse = User::factory()->create(['email' => 'someone-else@example.com']);
         $this->withHeaders(actingAsSupabaseUser($someoneElse))
-            ->postJson("/api/v1/invitations/accept/{$token}")
+            ->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->postJson('/api/v1/invitations/accept')
             // The email-mismatch guard fires before the consumed-token
             // check (the acceptor's email doesn't match the invitation).
             // That's still a refusal to consume the token — the contract
@@ -329,24 +370,35 @@ describe('POST /api/v1/invitations/accept/{token}', function (): void {
 
         for ($i = 0; $i < 10; $i++) {
             $this->withHeaders($headers)
-                ->postJson("/api/v1/invitations/accept/{$token}")
+                ->withHeader(INVITE_TOKEN_HEADER, $token)
+                ->postJson('/api/v1/invitations/accept')
                 ->assertOk();
         }
 
         $this->withHeaders($headers)
-            ->postJson("/api/v1/invitations/accept/{$token}")
+            ->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->postJson('/api/v1/invitations/accept')
             ->assertStatus(429);
     });
 
-    it('returns 404 invitation_not_found for malformed (too-short) tokens via the POST controller', function (): void {
-        // The route regex requires at least 16 chars — anything shorter
-        // 404s at the routing layer (no controller hit). 16-31 chars hit
-        // the controller, which 404s via the shape check.
+    it('returns 404 invitation_not_found for a malformed (too-short) token header', function (): void {
+        // No route regex — a 17-char header passes nothing at the router and
+        // fails the controller's 32-char shape floor, so the accept POST
+        // 404s via the shape check.
         $user = User::factory()->create();
 
-        // 17 chars — passes route regex, fails controller's 32-char floor.
         $this->withHeaders(actingAsSupabaseUser($user))
-            ->postJson('/api/v1/invitations/accept/abcdefghij1234567')
+            ->withHeader(INVITE_TOKEN_HEADER, 'abcdefghij1234567')
+            ->postJson('/api/v1/invitations/accept')
+            ->assertStatus(404)
+            ->assertJsonPath('code', 'invitation_not_found');
+    });
+
+    it('returns 404 invitation_not_found when the token header is missing', function (): void {
+        $user = User::factory()->create();
+
+        $this->withHeaders(actingAsSupabaseUser($user))
+            ->postJson('/api/v1/invitations/accept')
             ->assertStatus(404)
             ->assertJsonPath('code', 'invitation_not_found');
     });
@@ -354,7 +406,7 @@ describe('POST /api/v1/invitations/accept/{token}', function (): void {
 
 // ─── Destroy (decline) ───────────────────────────────────────────────────────
 
-describe('POST /api/v1/invitations/accept/{token}/decline', function (): void {
+describe('POST /api/v1/invitations/accept/decline', function (): void {
     it('marks a pending invitation as revoked and returns 204', function (): void {
         ['token' => $token, 'invitation' => $invite] = inviteWithToken([
             'email' => 'decliner@example.com',
@@ -362,7 +414,8 @@ describe('POST /api/v1/invitations/accept/{token}/decline', function (): void {
         $decliner = User::factory()->create(['email' => 'decliner@example.com']);
 
         $this->withHeaders(actingAsSupabaseUser($decliner))
-            ->postJson("/api/v1/invitations/accept/{$token}/decline")
+            ->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->postJson('/api/v1/invitations/accept/decline')
             ->assertNoContent();
 
         $fresh = $invite->fresh();
@@ -385,7 +438,8 @@ describe('POST /api/v1/invitations/accept/{token}/decline', function (): void {
 
         $user = User::factory()->create(['email' => $invite->email]);
         $this->withHeaders(actingAsSupabaseUser($user))
-            ->postJson("/api/v1/invitations/accept/{$token}/decline")
+            ->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->postJson('/api/v1/invitations/accept/decline')
             ->assertNoContent();
 
         // Service early-returns; revoked_at not bumped.
@@ -400,7 +454,8 @@ describe('POST /api/v1/invitations/accept/{token}/decline', function (): void {
         $wrong = User::factory()->create(['email' => 'imposter@example.com']);
 
         $this->withHeaders(actingAsSupabaseUser($wrong))
-            ->postJson("/api/v1/invitations/accept/{$token}/decline")
+            ->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->postJson('/api/v1/invitations/accept/decline')
             ->assertStatus(403)
             ->assertJsonPath('code', 'invitation_email_mismatch');
 
@@ -410,16 +465,25 @@ describe('POST /api/v1/invitations/accept/{token}/decline', function (): void {
     it('returns 401 without auth', function (): void {
         ['token' => $token] = inviteWithToken();
 
-        $this->postJson("/api/v1/invitations/accept/{$token}/decline")
+        $this->withHeader(INVITE_TOKEN_HEADER, $token)
+            ->postJson('/api/v1/invitations/accept/decline')
             ->assertStatus(401);
     });
 
-    it('returns 204 (silent) for a malformed token — no information leak', function (): void {
-        // 17 chars: passes the route regex (>=16) but fails the
-        // controller shape (>=32). The decline path swallows it.
+    it('returns 204 (silent) for a malformed token header — no information leak', function (): void {
+        // A 17-char header fails the controller shape (>=32). The decline
+        // path swallows it with 204 rather than revealing anything.
         $user = User::factory()->create();
         $this->withHeaders(actingAsSupabaseUser($user))
-            ->postJson('/api/v1/invitations/accept/aabbccddeeff11223/decline')
+            ->withHeader(INVITE_TOKEN_HEADER, 'aabbccddeeff11223')
+            ->postJson('/api/v1/invitations/accept/decline')
+            ->assertNoContent();
+    });
+
+    it('returns 204 (silent) when the token header is missing', function (): void {
+        $user = User::factory()->create();
+        $this->withHeaders(actingAsSupabaseUser($user))
+            ->postJson('/api/v1/invitations/accept/decline')
             ->assertNoContent();
     });
 });

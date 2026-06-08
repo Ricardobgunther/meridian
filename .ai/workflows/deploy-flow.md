@@ -100,9 +100,9 @@ Route::get('/health', function () {
 □ Features novas funcionando conforme especificação
 □ Features existentes não foram quebradas (smoke test manual)
 □ Logs sem novos erros: tail -f /app/storage/logs/laravel.log
-□ Logs de acesso NÃO vazam o token de convite: paths /api/v1/invitations/accept/*
-  e /invite/* aparecem redigidos no proxy/APM (ver "Observabilidade e Segredos
-  em Logs", R10)
+□ Logs de acesso NÃO vazam o token de convite: o path /invite/* aparece redigido
+  no proxy/APM (a API já usa header X-Invitation-Token) — ver "Observabilidade e
+  Segredos em Logs", R10
 □ Migrations aplicadas corretamente: php artisan migrate:status
 □ Performance aceitável: nenhuma rota > 1s em P99
 ```
@@ -307,45 +307,43 @@ return app(LegacyPdfEngine::class)->generate($invoice);
 > **Inegociável em produção.** O token de convite trafega **no path da URL** e
 > **é a credencial** — quem tem o token raw aceita o convite. Diferente de um
 > `Authorization: Bearer`, um path-param é capturado por padrão em praticamente
-> todo log de acesso e ferramenta de APM. Antes de habilitar qualquer logging de
-> acesso em produção, garanta que estes paths sejam **redigidos** (preferível) ou
-> **não logados**:
+> todo log de acesso e ferramenta de APM.
 >
-> - `GET|POST /api/v1/invitations/accept/{token}` e `.../{token}/decline` — backend
-> - `/invite/{token}` — página do frontend (Next.js); o servidor ainda faz fetch
->   server-side para o endpoint acima, então o token vaza nas duas camadas
+> **Estado atual (R10 longo prazo ✅):** a **API** já não carrega o token no path —
+> os endpoints `GET|POST /api/v1/invitations/accept` e `.../accept/decline` leem o
+> token do header `X-Invitation-Token` (rotas estáticas). Logo o backend/API **não
+> vaza mais** o token via path. **Resta uma superfície:** a página do frontend
+> `/invite/{token}` (Next.js), cujo path É o link que o usuário clica — essa não dá
+> para tirar do path, então é coberta por redação de log + `Referrer-Policy`.
 >
-> **Aplique a redação em TODO proxy/gateway no caminho — não só num.** A perna
-> SSR resolve o backend via env (`NEXT_PUBLIC_API_URL` / `API_BASE_URL`, ver
-> `frontend/lib/api/client.ts`); se em produção ela bate direto no upstream do
-> backend, o `map` configurado só no edge do frontend **não** cobre o access_log
-> desse upstream. Redija no proxy do frontend **e** no(s) proxy(ies) do backend,
-> além de qualquer CDN/WAF/API gateway na frente (Cloudflare, etc.).
+> **Aplique a redação em TODO proxy/gateway no caminho do frontend** (edge do
+> Next, CDN/WAF/API gateway na frente — Cloudflare, etc.). A perna SSR agora chama
+> a API com o token no header, então o upstream do backend não precisa mais de
+> redação por esse motivo.
 
 ### Onde o token vaza
 | Camada | Como vaza | Mitigação |
 |--------|-----------|-----------|
-| Nginx / proxy / LB (frontend **e** backend) | `$request_uri` no `access_log` | redigir o segmento do token (map abaixo), em **todos** os proxies do caminho |
-| CDN / WAF / API gateway (Cloudflare, etc.) | captura do path nos logs de borda | mesma regra de redação/scrubbing por path no provedor |
-| Next.js runtime | logs de acesso/SSR que registram a URL | redigir/excluir os paths `/invite/*` |
+| API backend (`/api/v1/invitations/accept*`) | — | ✅ **resolvido**: token no header `X-Invitation-Token`, fora do path (R10 longo prazo) |
+| Nginx / proxy / CDN / WAF do **frontend** | `$request_uri` de `/invite/<token>` no `access_log` | redigir o segmento do token (map abaixo) em todos os proxies do caminho do frontend |
+| Next.js runtime | logs de acesso/SSR que registram a URL `/invite/<token>` | redigir/excluir os paths `/invite/*` |
 | **`Referer` header** | a página `/invite/<token>` carrega no browser com o token no path; qualquer recurso de origem externa (analytics, fonte, pixel) ou link clicado recebe `/invite/<token>` no `Referer` → vaza para terceiros e logs deles | ✅ **já mitigado**: `Referrer-Policy: no-referrer` em `/invite/*` via `frontend/next.config.mjs` (testado em `next.config.test.ts`) |
-| APM / observabilidade (Sentry, Datadog, etc.) | captura de URL completa em traces/breadcrumbs | regra de scrubbing por prefixo de path |
-| Logs de Auth (Supabase/PostgREST) | o POST `accept/{token}` passa pelo Supabase; access logs do PostgREST/gateway capturam o path | aplicar redação/scrubbing onde esses logs forem coletados |
+| APM / observabilidade (Sentry, Datadog, etc.) | captura da URL `/invite/<token>` em traces/breadcrumbs | regra de scrubbing por prefixo de path |
 | `laravel.log` | **não** loga o path por padrão — só vaza se você logar `$request->fullUrl()` | nunca logar a URL completa de rotas accept-by-token |
 
-> ⚠️ A redação cobre o **path**. Não reintroduza o vazamento por outra via:
-> `$http_authorization` em qualquer `log_format` captura o Bearer — mantenha fora.
-> `$http_referer` só é seguro porque enforçamos `Referrer-Policy: no-referrer` em
-> `/invite/*` (ver linha da tabela); sem essa policy, ele volta a logar o token.
+> ⚠️ A redação cobre o **path** do `/invite/*`. Não reintroduza o vazamento por
+> outra via: `$http_authorization` (Bearer) e `$http_x_invitation_token` (o token
+> de convite!) **nunca** devem entrar num `log_format`. `$http_referer` só é seguro
+> porque enforçamos `Referrer-Policy: no-referrer` em `/invite/*` (ver linha da
+> tabela); sem essa policy, ele volta a logar o token.
 
 ### Redação no Nginx (recomendado — preserva o resto da linha de log)
 ```nginx
-# Substitui o token por [REDACTED] mantendo o restante do path/query visível.
+# Redige o token na página /invite/<token> (a API já não tem token no path).
 # Use $loggable_uri no lugar de $request no log_format.
 map $request_uri $loggable_uri {
-    ~^(?<p>/api/v1/invitations/accept/)[^/?]+(?<s>.*)$  "${p}[REDACTED]${s}";
-    ~^(?<p2>/invite/)[^/?]+(?<s2>.*)$                   "${p2}[REDACTED]${s2}";
-    default                                              $request_uri;
+    ~^(?<p>/invite/)[^/?]+(?<s>.*)$  "${p}[REDACTED]${s}";
+    default                          $request_uri;
 }
 
 log_format redacted '$remote_addr - $remote_user [$time_local] '
@@ -355,9 +353,9 @@ log_format redacted '$remote_addr - $remote_user [$time_local] '
 access_log /var/log/nginx/access.log redacted;
 ```
 
-Alternativa mais simples (perde a linha inteira desses paths):
+Alternativa mais simples (perde a linha inteira desse path):
 ```nginx
-location ~ ^/(api/v1/invitations/accept|invite)/ {
+location ~ ^/invite/ {
     access_log off;
     # ... proxy_pass etc.
 }
