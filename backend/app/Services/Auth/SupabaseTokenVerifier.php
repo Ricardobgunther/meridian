@@ -49,6 +49,8 @@ class SupabaseTokenVerifier
      * @throws \Firebase\JWT\SignatureInvalidException
      * @throws \Firebase\JWT\BeforeValidException
      * @throws UnexpectedValueException  Malformed token or unsupported alg.
+     * @throws \DomainException          Bad signature/key or an OpenSSL
+     *                                   failure surfaced by JWT::verify().
      * @throws RuntimeException          Verifier is misconfigured for this alg.
      */
     public function decode(string $token): stdClass

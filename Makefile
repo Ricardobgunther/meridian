@@ -11,7 +11,7 @@ FRONTEND := frontend
 
 .DEFAULT_GOAL := help
 .PHONY: help up down dev dev-frontend artisan migrate fresh \
-        test test-backend test-frontend lint
+        test test-backend test-frontend lint analyse
 
 help: ## Lista os alvos disponíveis
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -46,6 +46,10 @@ test-backend: ## Pest (backend)
 test-frontend: ## Vitest em modo run (frontend)
 	cd $(FRONTEND) && npm run test:run
 
-lint: ## ESLint (frontend) + Pint (backend)
+lint: ## ESLint (frontend) + Pint + Larastan (backend) — espelha o CI
 	cd $(FRONTEND) && npm run lint
 	cd $(BACKEND) && ./vendor/bin/pint --test
+	cd $(BACKEND) && vendor/bin/phpstan analyse --memory-limit=512M
+
+analyse: ## Só o Larastan/PHPStan (backend)
+	cd $(BACKEND) && vendor/bin/phpstan analyse --memory-limit=512M
