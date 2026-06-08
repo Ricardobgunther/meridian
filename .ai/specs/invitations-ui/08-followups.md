@@ -61,11 +61,12 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 - **Proposta:** criar `t.invitations.list.invitedByLabel` (string fixa) e usar em conjunto com o tier visual já existente.
 - **Resolução:** adicionada a chave fixa `invitedByLabel: 'convidado por '` em `invitations.list` e usada no span `text-text-disabled`. Não reusou a função `invitedBy(name)` existente, pois ela colapsaria a estrutura bicolor de dois spans (label cinza + nome em itálico-se-inativo). Estrutura visual preservada.
 
-### R8 — Sign-out via `window.location.assign` perde toasts
+### R8 — Sign-out via `window.location.assign` perde toasts ✅ RESOLVIDO (2026-06-07)
 - **Arquivo:** `frontend/app/invite/[token]/_components/SignOutButton.tsx:31`
 - **Agent:** `frontend-agent`
 - **Risco:** hard reload é intencional (limpar cookies stale) mas perde toasts pendentes.
 - **Proposta:** ou aceitar trade-off (documentar inline), ou flushar/aguardar toast antes do reload.
+- **Resolução:** alinhado ao padrão já usado em `UserMenu`/`LogoutButton` — a navegação saiu do `finally` (que rodava mesmo na falha) e agora só acontece no **caminho de sucesso**. Em falha do `signOut` (`{ error }` ou throw) o componente **não navega**: reseta o loading, mostra `toast.error` (via `parseApiError`, igual ao `UserMenu`) e deixa o usuário re-tentar. Como o único toast (erro) está num caminho que não recarrega, o hard reload do sucesso — mantido de propósito para derrubar o singleton do client Supabase + cookies stale — não tem feedback a perder. Novo `SignOutButton.test.tsx` (5 casos): label, sucesso navega para `/login?invite=<token>` URL-encoded sem toast, loading desabilita/`aria-busy`, e os dois ramos de erro (returned-error + throw) que mostram toast e **não** navegam. `tsc` limpo, ESLint limpo, suíte frontend **150/150 verde**.
 
 ### R9 — Estado `accepted` colapsado como `expired` no UX ✅ RESOLVIDO (2026-05-29)
 - **Arquivo:** `frontend/app/invite/[token]/page.tsx`
@@ -113,7 +114,7 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 
 - Total: **13 follow-ups** (6 backend, 5 frontend, 1 misto, 1 infra).
 - Nenhum é blocker para merge.
-- Sugestão de priorização (restantes): **R8 > R10 > R11**.
+- Sugestão de priorização (restantes): **R10 > R11**.
 - **Status (2026-05-29):** R1 ✅, R4 ✅ e R9 ✅ resolvidos. R11 e R12 adicionados (levantados nos reviews de R1 e R9).
 - **Status (2026-06-06):** R6 ✅ (obsoleto — payload já devolve `role`), R7 ✅ e R12 ✅ resolvidos. Depois, R2 ✅ (lock de linha da org, portável Postgres/SQLite) e R5 ✅ (named limiter `accept_invitation` 10/min/IP no POST) resolvidos. R13 adicionado (trusted proxies, levantado no review de R5) e em seguida ✅ resolvido (config dirigida por env, default seguro). Restam **4**: R3, R8, R10, R11.
-- **Status (2026-06-07):** R3 ✅ resolvido (extraído `InvitationTokenIssuer`; service 318 → 294 efetivas; 245/245 verde). Restam **3**: R8, R10, R11 (todos frontend/observabilidade).
+- **Status (2026-06-07):** R3 ✅ resolvido (extraído `InvitationTokenIssuer`; service 318 → 294 efetivas; 245/245 verde). Depois R8 ✅ resolvido (sign-out do invite não navega em erro, mostra toast; padrão alinhado a `UserMenu`/`LogoutButton`; 150/150 frontend). Restam **2**: R10 (token raw em logs — devops/observabilidade) e R11 (email síncrono na transação — **bloqueado** pelo worker de fila ainda ausente no docker-compose).
