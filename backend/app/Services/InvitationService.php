@@ -32,8 +32,8 @@ use Illuminate\Support\Str;
  * in {@see InvitationTokenIssuer}; the raw token is never persisted —
  * only its SHA-256 digest lives in `token_hash`. Rate limit: 20 issuances
  * per rolling 24h per org, counted inside the transaction so concurrent
- * callers cannot both squeak past. Email delivery is synchronous (no
- * queue yet).
+ * callers cannot both squeak past. Email delivery is queued and dispatched
+ * after commit (R11) — see {@see dispatchInvitationMail()}.
  */
 class InvitationService
 {
@@ -485,14 +485,23 @@ class InvitationService
     }
 
     /**
-     * Synchronous send — the surrounding transaction rolls back on any
-     * exception so we never leave a pending row the recipient cannot see.
+     * Queue the invitation email and defer the dispatch until AFTER the
+     * surrounding transaction commits — follow-up R11. Previously this sent
+     * synchronously inside `DB::transaction()`, so a slow/failing SMTP host
+     * held the row lock for the whole send and a delivery error rolled back
+     * an already-decided state change.
      *
-     * TODO(queue): switch to `Mail::to(...)->queue(...)` once the queue
-     * worker is wired into docker-compose.
+     * `InvitationMail` is `ShouldQueue`, and `->afterCommit()` holds the job
+     * dispatch until the transaction is durably committed: the invitation
+     * row persists first, then the mail job is enqueued. A later mail
+     * failure no longer undoes the invitation — the job retries and, if it
+     * keeps failing, lands in `failed_jobs`. Requires a running queue worker
+     * (`php artisan queue:work`; `composer dev` already runs `queue:listen`).
      */
     private function dispatchInvitationMail(Invitation $invitation, string $rawToken): void
     {
-        Mail::to($invitation->email)->send(new InvitationMail($invitation, $rawToken));
+        Mail::to($invitation->email)->queue(
+            (new InvitationMail($invitation, $rawToken))->afterCommit(),
+        );
     }
 }

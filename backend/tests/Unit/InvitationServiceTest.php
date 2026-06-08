@@ -18,9 +18,12 @@ use App\Models\Membership;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\InvitationService;
+use Illuminate\Contracts\Queue\ShouldBeEncrypted;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Mail;
+use Tests\TestCase;
 
 /*
 |--------------------------------------------------------------------------
@@ -32,7 +35,7 @@ use Illuminate\Support\Facades\Mail;
 | explicitly because `tests/Pest.php` only applies them under `Feature/`.
 |
 */
-uses(Tests\TestCase::class, RefreshDatabase::class);
+uses(TestCase::class, RefreshDatabase::class);
 
 beforeEach(function (): void {
     Mail::fake();
@@ -55,6 +58,27 @@ describe('InvitationService::invite()', function (): void {
         $hash = $result['invitation']->getAttribute('token_hash');
         expect($hash)->toBe(hash('sha256', $token));
         expect(strlen($hash))->toBe(64);
+    });
+
+    it('queues the mail after commit instead of sending it inside the transaction (R11)', function (): void {
+        $org = Organization::factory()->create();
+        $inviter = User::factory()->create();
+
+        $this->service->invite($org, $inviter, 'async@example.com', MembershipRole::Member);
+
+        // Nothing is sent synchronously — the dispatch is deferred to the queue.
+        Mail::assertNothingSent();
+        Mail::assertQueued(InvitationMail::class, function (InvitationMail $mail): bool {
+            // Async (ShouldQueue) so a slow/failing SMTP host can't hold the
+            // row lock; encrypted at rest so the raw token in the job payload
+            // never sits in plaintext in the jobs table.
+            expect($mail)->toBeInstanceOf(ShouldQueue::class);
+            expect($mail)->toBeInstanceOf(ShouldBeEncrypted::class);
+            // Deferred until the invitation transaction commits.
+            expect($mail->afterCommit)->toBeTrue();
+
+            return $mail->hasTo('async@example.com');
+        });
     });
 
     it('normalises the email and stamps a 7-day expiry', function (): void {
@@ -94,7 +118,7 @@ describe('InvitationService::invite()', function (): void {
             'organization_id' => $org->id,
             'email' => 'already@example.com',
         ]);
-        Mail::assertNothingSent();
+        Mail::assertNothingQueued();
     });
 
     it('does NOT consider a soft-deleted member as still a member', function (): void {
@@ -338,7 +362,7 @@ describe('InvitationService::resend()', function (): void {
             Carbon::setTestNow();
         }
 
-        Mail::assertSent(InvitationMail::class, function (InvitationMail $mail): bool {
+        Mail::assertQueued(InvitationMail::class, function (InvitationMail $mail): bool {
             return $mail->hasTo('resend@example.com');
         });
     });

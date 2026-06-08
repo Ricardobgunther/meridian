@@ -85,11 +85,12 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 
 ---
 
-### R11 — Envio de email síncrono dentro da transação
+### R11 — Envio de email síncrono dentro da transação ✅ RESOLVIDO (2026-06-07)
 - **Arquivo:** `backend/app/Services/InvitationService.php` (`dispatchInvitationMail` em `invite()` e `resend()`)
 - **Agent:** `backend-agent`
 - **Risco:** `Mail::...->send()` roda síncrono dentro do `DB::transaction()`. Um SMTP lento/falho segura o lock da linha (agora mais relevante após o lock por-convite do R1) e pode reverter uma mudança de estado de intenção-commitada. Levantado pelo `review-agent` ao revisar R1 — pré-existente, não introduzido por R1.
 - **Proposta:** trocar para `Mail::...->queue()` ou dispatch-after-commit, depois que o worker de fila estiver no docker-compose (já há um `TODO(queue)` no método).
+- **Resolução:** `InvitationMail` agora é `ShouldQueue` e o serviço despacha com `Mail::to(...)->queue((new InvitationMail(...))->afterCommit())`. O envio sai da transação: o job só é enfileirado **após o commit**, então um SMTP lento/falho não segura mais o lock da linha nem reverte um estado de intenção já decidido — uma falha posterior de email apenas retenta (`$tries = 3`, `$backoff = [10,30,60]`) e, persistindo, cai em `failed_jobs`. **Segurança:** como enfileirar serializa o token raw no payload do job (o projeto antes nunca persistia o token em claro), o mailable também é `ShouldBeEncrypted` — payload cifrado em repouso na `jobs`/`failed_jobs`, preservando a invariante "só o digest SHA-256 é persistido". Testes de mail migrados de `assertSent`→`assertQueued` (e `assertNothingSent`→`assertNothingQueued`, senão passariam trivialmente) + novo teste fixando o contrato R11 (async + after-commit + encrypted). Suíte backend **246/246 verde**. **Infra (worker):** decisão de **documentar** em vez de containerizar (não há Dockerfile da app) — comentário no `docker-compose.yml` + seção "Filas e Queue Worker" no `deploy-flow.md` (local: `composer dev` já roda `queue:listen`; prod: `queue:work` supervisionado + `queue:restart` no deploy).
 
 ### R12 — Ramo `status === 409` morto no `AcceptForm` ✅ RESOLVIDO (2026-06-06)
 - **Arquivo:** `frontend/app/invite/[token]/_components/AcceptForm.tsx:63-66`
@@ -115,7 +116,7 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 
 - Total: **13 follow-ups** (6 backend, 5 frontend, 1 misto, 1 infra).
 - Nenhum é blocker para merge.
-- Sugestão de priorização (restantes): **R11** + longo prazo do R10 (header de token).
+- Sugestão de priorização (restantes): **longo prazo do R10** (header de token).
 - **Status (2026-05-29):** R1 ✅, R4 ✅ e R9 ✅ resolvidos. R11 e R12 adicionados (levantados nos reviews de R1 e R9).
 - **Status (2026-06-06):** R6 ✅ (obsoleto — payload já devolve `role`), R7 ✅ e R12 ✅ resolvidos. Depois, R2 ✅ (lock de linha da org, portável Postgres/SQLite) e R5 ✅ (named limiter `accept_invitation` 10/min/IP no POST) resolvidos. R13 adicionado (trusted proxies, levantado no review de R5) e em seguida ✅ resolvido (config dirigida por env, default seguro). Restam **4**: R3, R8, R10, R11.
-- **Status (2026-06-07):** R3 ✅ resolvido (extraído `InvitationTokenIssuer`; service 318 → 294 efetivas; 245/245 verde). Depois R8 ✅ resolvido (sign-out do invite não navega em erro, mostra toast; padrão alinhado a `UserMenu`/`LogoutButton`; 150/150 frontend). Depois **R10 curto prazo ✅** (seção de redação de token em logs no `deploy-flow.md` + item no checklist de staging). Restam: **R10 longo prazo** (mover token para header `X-Invitation-Token` — contratual) e **R11** (email síncrono na transação — **bloqueado** pelo worker de fila ainda ausente no docker-compose).
+- **Status (2026-06-07):** R3 ✅ resolvido (extraído `InvitationTokenIssuer`; service 318 → 294 efetivas; 245/245 verde). Depois R8 ✅ resolvido (sign-out do invite não navega em erro, mostra toast; padrão alinhado a `UserMenu`/`LogoutButton`; 150/150 frontend). Depois **R10 curto prazo ✅** (seção de redação de token em logs no `deploy-flow.md` + item no checklist de staging) e **R11 ✅** (mail enfileirado after-commit, `ShouldQueue`+`ShouldBeEncrypted`; worker documentado em vez de containerizado; 246/246 backend). Resta apenas: **R10 longo prazo** (mover token para header `X-Invitation-Token` — mudança contratual backend+frontend).

@@ -37,8 +37,8 @@ beforeEach(function (): void {
         'supabase.url' => null,
     ]);
 
-    // Always fake mail in the admin tests — store/resend dispatch
-    // InvitationMail synchronously inside the service transaction.
+    // Always fake mail in the admin tests — store/resend queue
+    // InvitationMail after the service transaction commits (R11).
     Mail::fake();
 });
 
@@ -316,7 +316,7 @@ describe('POST /api/v1/invitations', function (): void {
             'invited_by_user_id' => $owner->id,
         ]);
 
-        Mail::assertSent(InvitationMail::class, function (InvitationMail $mail) {
+        Mail::assertQueued(InvitationMail::class, function (InvitationMail $mail) {
             return $mail->hasTo('newcomer@example.com');
         });
     });
@@ -573,7 +573,7 @@ describe('POST /api/v1/invitations', function (): void {
             ])
             ->assertStatus(403);
 
-        Mail::assertNothingSent();
+        Mail::assertNothingQueued();
     });
 });
 
@@ -713,7 +713,7 @@ describe('POST /api/v1/invitations/{invitation}/resend', function (): void {
             // expires_at must be in the future, ahead of the original.
             expect($fresh->expires_at->greaterThan($originalExpiresAt))->toBeTrue();
 
-            Mail::assertSent(InvitationMail::class, function (InvitationMail $mail) use ($invite) {
+            Mail::assertQueued(InvitationMail::class, function (InvitationMail $mail) use ($invite) {
                 return $mail->hasTo($invite->email);
             });
         } finally {
@@ -731,7 +731,7 @@ describe('POST /api/v1/invitations/{invitation}/resend', function (): void {
             ->assertStatus(422)
             ->assertJsonPath('code', 'invitation_not_pending');
 
-        Mail::assertNothingSent();
+        Mail::assertNothingQueued();
     });
 
     it('returns 422 invitation_not_pending when the invite is revoked', function (): void {

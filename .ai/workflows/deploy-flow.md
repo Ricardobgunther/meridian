@@ -209,6 +209,46 @@ ssh deploy@prod "docker compose logs -f app --tail=50"
 
 ---
 
+## Filas e Queue Worker
+
+Alguns fluxos despacham trabalho assíncrono — notadamente o **email de convite**,
+que é enfileirado e despachado **after-commit** (`InvitationMail` é `ShouldQueue`,
+follow-up R11). O job só vira email se um **worker estiver rodando**; sem worker, a
+linha fica parada na tabela `jobs` e o convidado nunca recebe o link.
+
+### Requisito (inegociável em produção)
+Manter ao menos um `php artisan queue:work` como **processo supervisionado**
+(supervisor/systemd/container dedicado) — não um one-shot. O passo 6 do deploy
+(`php artisan queue:restart`) apenas sinaliza os workers existentes para
+reiniciarem e pegarem o código novo; ele **não cria** um worker.
+
+```bash
+# Exemplo de programa supervisor (produção)
+# [program:projeto1-queue]
+# command=php /app/artisan queue:work --tries=3 --max-time=3600 --sleep=3
+# autostart=true   autorestart=true   numprocs=1
+# stopwaitsecs=3600   # deixa o job em andamento terminar no deploy
+```
+
+- **Local:** `composer dev` (em `backend/`) já roda `php artisan queue:listen`
+  junto com server/vite/logs — nenhum setup extra.
+- **`QUEUE_CONNECTION`:** `database` por padrão (tabela `jobs`); a stack prevê
+  Redis em produção. O worker é o mesmo comando em qualquer driver.
+- **Falhas:** jobs que esgotam `--tries` caem em `failed_jobs`. Monitorar e
+  reprocessar com `php artisan queue:retry`. O payload do `InvitationMail` é
+  **encriptado** em repouso (`ShouldBeEncrypted`), então o token raw não fica em
+  claro nessa tabela.
+
+### Verificação pós-deploy
+```bash
+# Worker vivo e consumindo?
+ssh deploy@prod "docker compose exec app php artisan queue:monitor default"
+# Jobs falhados acumulando?
+ssh deploy@prod "docker compose exec app php artisan queue:failed"
+```
+
+---
+
 ## Rollback
 
 ### Quando Fazer Rollback

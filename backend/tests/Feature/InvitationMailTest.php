@@ -33,7 +33,7 @@ it('targets the invitee email and uses the PT-BR subject with org name', functio
     $service = app(InvitationService::class);
     $result = $service->invite($org, $inviter, 'invitee@example.com', MembershipRole::Admin);
 
-    Mail::assertSent(InvitationMail::class, function (InvitationMail $mail) use ($result): bool {
+    Mail::assertQueued(InvitationMail::class, function (InvitationMail $mail) use ($result): bool {
         expect($mail->hasTo('invitee@example.com'))->toBeTrue();
         expect($mail->envelope()->subject)->toBe('Você foi convidado para entrar em Acme Foundation');
         // The Mailable holds the RAW token (not the hash) so the rendered

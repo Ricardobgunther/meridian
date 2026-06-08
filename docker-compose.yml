@@ -1,3 +1,17 @@
+# Auxiliary dev services only — the Laravel app and the Next.js frontend run
+# on the host (não containerizados aqui).
+#
+# Fila / Queue worker (R11): a invitation email é enfileirada e despachada
+# after-commit (QUEUE_CONNECTION=database por padrão), então um worker PRECISA
+# estar rodando para que os emails saiam da tabela `jobs`:
+#   - Local:  `composer dev` (no backend/) já sobe `php artisan queue:listen`
+#             junto com o server, vite e logs. Nada a fazer aqui.
+#             Sozinho: `php artisan queue:work` (ou `queue:listen` em dev).
+#   - Prod:   rodar `php artisan queue:work` como processo supervisionado
+#             (supervisor/systemd) e `php artisan queue:restart` em cada deploy
+#             (ver .ai/workflows/deploy-flow.md → "Filas e Queue Worker").
+# Um worker containerizado exigiria primeiro um Dockerfile do backend, que o
+# projeto ainda não tem — fora do escopo do R11.
 services:
   # Mailpit — SMTP catcher for local development.
   # Backend (Laravel) envia emails para porta 1025; UI web disponível em http://localhost:8025.
