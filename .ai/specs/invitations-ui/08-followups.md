@@ -75,12 +75,13 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 - **Proposta:** quarta variante `HardStopCard kind="accepted"` com mensagem "Convite já aceito" + CTA para o workspace.
 - **Resolução:** adicionada a variante `HardStopCard kind="accepted"` (`role="status"`, não `alert` — estado positivo, spec §6; ícone `CheckCircle2` em `text-accent`). `resolveInitialState` mapeia `status: 'accepted' → { kind: 'accepted' }`. Como o preview de convite consumido não traz o slug da org, a CTA "Ir para o workspace" aponta para `/` (roteia o usuário autenticado). Novas strings `acceptedTitle/Body/Cta`. Coberto por teste no `InvitePageView.test.tsx`.
 
-### R10 — Token raw em path-param de logs de access
+### R10 — Token raw em path-param de logs de access ⏳ CURTO PRAZO ✅ RESOLVIDO (2026-06-07) / longo prazo pendente
 - **Arquivo:** `frontend/app/invite/[token]/page.tsx:78-89` + observabilidade
 - **Agent:** `devops-agent` (config) + `frontend-agent` (longo prazo)
 - **Risco:** `/api/v1/invitations/accept/<token>` aparece em logs de access do Next runtime e ferramentas de observabilidade. O token raw é a credencial.
 - **Proposta curto prazo:** documentar no runbook que rotas `/api/v1/invitations/accept/*` não devem ser logadas em produção.
 - **Proposta longo prazo:** mover token para header customizado (`X-Invitation-Token`) — mudança contratual, exige coordenação com backend.
+- **Resolução (curto prazo):** nova seção **"Observabilidade e Segredos em Logs (R10)"** em `.ai/workflows/deploy-flow.md`, marcada como inegociável em produção. Documenta que o token trafega no path e é credencial (≠ `Authorization: Bearer`, que não é logado por padrão), mapeia onde vaza por **todas** as camadas (Nginx/proxy do frontend **e** do backend, CDN/WAF/gateway, Next runtime, header `Referer`, APM, logs de Supabase/PostgREST, `laravel.log`) e dá mitigação concreta: redação via `map $request_uri $loggable_uri` no Nginx (recomendado — preserva o resto da linha) **aplicada em todo proxy do caminho** ou `access_log off` por `location` (alternativa, com aviso de que cega detecção de abuso); URL scrubbing no APM; aviso de nunca logar `$request->fullUrl()` nem incluir `$http_authorization` em log_format. Cobre tanto `/api/v1/invitations/accept/*` quanto a página `/invite/*` (o SSR refaz o fetch, então vaza nas duas camadas). Item adicionado ao **Checklist de Staging**. **Fix concreto incluído:** `Referrer-Policy: no-referrer` em `/invite/*` via `frontend/next.config.mjs` (impede o browser de vazar o token no `Referer` para recursos cross-origin / links de saída), com teste `next.config.test.ts`. A solução durável (header `X-Invitation-Token`) fica apontada como o longo prazo — **ainda pendente** (mudança contratual backend+frontend).
 
 ---
 
@@ -114,7 +115,7 @@ Cada item lista: arquivo / agent responsável / risco / proposta.
 
 - Total: **13 follow-ups** (6 backend, 5 frontend, 1 misto, 1 infra).
 - Nenhum é blocker para merge.
-- Sugestão de priorização (restantes): **R10 > R11**.
+- Sugestão de priorização (restantes): **R11** + longo prazo do R10 (header de token).
 - **Status (2026-05-29):** R1 ✅, R4 ✅ e R9 ✅ resolvidos. R11 e R12 adicionados (levantados nos reviews de R1 e R9).
 - **Status (2026-06-06):** R6 ✅ (obsoleto — payload já devolve `role`), R7 ✅ e R12 ✅ resolvidos. Depois, R2 ✅ (lock de linha da org, portável Postgres/SQLite) e R5 ✅ (named limiter `accept_invitation` 10/min/IP no POST) resolvidos. R13 adicionado (trusted proxies, levantado no review de R5) e em seguida ✅ resolvido (config dirigida por env, default seguro). Restam **4**: R3, R8, R10, R11.
-- **Status (2026-06-07):** R3 ✅ resolvido (extraído `InvitationTokenIssuer`; service 318 → 294 efetivas; 245/245 verde). Depois R8 ✅ resolvido (sign-out do invite não navega em erro, mostra toast; padrão alinhado a `UserMenu`/`LogoutButton`; 150/150 frontend). Restam **2**: R10 (token raw em logs — devops/observabilidade) e R11 (email síncrono na transação — **bloqueado** pelo worker de fila ainda ausente no docker-compose).
+- **Status (2026-06-07):** R3 ✅ resolvido (extraído `InvitationTokenIssuer`; service 318 → 294 efetivas; 245/245 verde). Depois R8 ✅ resolvido (sign-out do invite não navega em erro, mostra toast; padrão alinhado a `UserMenu`/`LogoutButton`; 150/150 frontend). Depois **R10 curto prazo ✅** (seção de redação de token em logs no `deploy-flow.md` + item no checklist de staging). Restam: **R10 longo prazo** (mover token para header `X-Invitation-Token` — contratual) e **R11** (email síncrono na transação — **bloqueado** pelo worker de fila ainda ausente no docker-compose).
