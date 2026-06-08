@@ -120,10 +120,13 @@ hotfix/critico
 
 ## Comandos Rápidos
 
+A app roda no host; o docker-compose sobe só serviços auxiliares (Mailpit).
+Rode `make help` para a lista completa.
+
 ```bash
-make up                        # inicia tudo
-make down                      # para tudo
-make shell                     # shell no container PHP
-make artisan cmd="migrate"     # php artisan migrate
-make test                      # todos os testes
+make up                        # sobe serviços auxiliares (Mailpit)
+make dev                       # roda o backend no host (server+queue+logs+vite)
+make down                      # para os serviços auxiliares
+make artisan cmd="migrate"     # php artisan no host
+make test                      # todos os testes (backend + frontend)
 ```
