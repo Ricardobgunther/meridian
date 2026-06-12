@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n/t';
 import { useUiStore } from '@/lib/stores/ui-store';
+import { useCheckSlug } from '@/hooks/use-check-slug';
 import { useCreateOrg } from '@/hooks/use-create-org';
 import { isValidSlug, slugify } from '@/lib/utils/string';
 import { parseApiError } from '@/lib/api/errors';
@@ -54,6 +55,12 @@ export function CreateOrgModal() {
   const [touched, setTouched] = useState({ name: false, slug: false });
   const nameInputRef = useRef<HTMLInputElement>(null);
   const createMutation = useCreateOrg();
+  // Preview advisory de disponibilidade. Durante o submit a checagem é
+  // suspensa (passa '') — regra de trigger 3 da spec 03 §1. Observa o VALOR
+  // do slug (inclusive auto-derivado do nome), não o touched flag.
+  const { status: slugStatus } = useCheckSlug(
+    createMutation.isPending ? '' : values.slug,
+  );
 
   useEffect(() => {
     if (open) {
@@ -167,6 +174,7 @@ export function CreateOrgModal() {
             name={values.name}
             slug={values.slug}
             errors={errors}
+            slugStatus={slugStatus}
             isSubmitting={isSubmitting}
             canSubmit={canSubmit}
             onNameChange={handleNameChange}

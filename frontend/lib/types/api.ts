@@ -175,3 +175,17 @@ export interface AcceptResponse {
     role: InvitationRole;
   };
 }
+
+// ── Slug availability (GET /api/v1/organizations/check-slug) ───────────
+
+/** Resposta advisory — o 422 do POST /organizations segue sendo a verdade. */
+export interface SlugCheckResponse {
+  data: {
+    slug: string;
+    available: boolean;
+  };
+}
+
+export type SlugCheckStatus = 'idle' | 'checking' | 'available' | 'taken';
+
+// POST /organizations/{id}/leave → 204, sem body. Use apiFetch<void>.

@@ -49,5 +49,11 @@ export const orgs = {
       slugMax: 'O identificador pode ter no máximo 60 caracteres.',
       slugTaken: 'Este identificador já está em uso. Tente outro.',
     },
+    slugCheck: {
+      checking: 'Verificando disponibilidade…',
+      available: 'Disponível',
+      // "taken" reusa t.orgs.create.errors.slugTaken — uma mensagem, dois
+      // momentos (preview e 422 pós-submit). Não duplicar a string.
+    },
   },
 } as const;

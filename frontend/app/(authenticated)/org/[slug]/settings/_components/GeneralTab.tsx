@@ -15,6 +15,7 @@ import { useUpdateOrg } from '@/hooks/use-update-org';
 
 import { DangerZone } from './DangerZone';
 import { GeneralForm, type GeneralFormErrors } from './GeneralForm';
+import { LeaveOrgSection } from './LeaveOrgSection';
 
 interface GeneralTabProps {
   slug: string;
@@ -167,6 +168,11 @@ export function GeneralTab({ slug }: GeneralTabProps) {
           onCancel={handleCancel}
         />
       </section>
+
+      {/* Entre Informações e Zona de perigo (spec 02 §1): severidade
+          crescente — editar → sair → destruir. Visível para todos os papéis;
+          por isso NÃO vive dentro do DangerZone (owner-only). */}
+      {role && <LeaveOrgSection organization={organization} role={role} />}
 
       {canDelete && <DangerZone organization={organization} />}
 

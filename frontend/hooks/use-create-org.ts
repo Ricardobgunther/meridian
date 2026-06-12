@@ -6,9 +6,15 @@ import { toast } from 'sonner';
 
 import { apiFetch } from '@/lib/api/client';
 import { setCurrentOrgId } from '@/lib/org/current';
+import { parseApiError } from '@/lib/api/errors';
 import { t } from '@/lib/i18n/t';
-import type { Organization, SingleResource } from '@/lib/types/api';
+import type {
+  Organization,
+  SingleResource,
+  SlugCheckResponse,
+} from '@/lib/types/api';
 
+import { slugCheckQueryKey } from './use-check-slug';
 import { ME_QUERY_KEY } from './use-me';
 import { ORGS_QUERY_KEY } from './use-organizations';
 
@@ -40,6 +46,17 @@ export function useCreateOrg() {
         },
       );
       return res.data;
+    },
+    onError: (err, variables) => {
+      // 422 em `slug`: o servidor acabou de afirmar que o slug não serve —
+      // sobrescreve o cache advisory do preview (spec 03 §1).
+      const parsed = parseApiError(err);
+      if (parsed.status === 422 && parsed.fieldErrors?.slug) {
+        queryClient.setQueryData<SlugCheckResponse>(
+          slugCheckQueryKey(variables.slug),
+          { data: { slug: variables.slug, available: false } },
+        );
+      }
     },
     onSuccess: (org) => {
       setCurrentOrgId(org.id);

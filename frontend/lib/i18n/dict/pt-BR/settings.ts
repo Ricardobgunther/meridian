@@ -25,6 +25,28 @@ export const settings = {
     confirmSlugConfirm: 'Confirmar',
     confirmSlugCancel: 'Cancelar',
   },
+  leaveOrg: {
+    title: 'Sair da organização',
+    body: (orgName: string) =>
+      `Você perderá o acesso a ${orgName}. Para voltar, será necessário receber um novo convite.`,
+    ownerHint: 'Donos só podem sair quando houver outro Dono na organização.',
+    cta: 'Sair da organização',
+    confirmTitle: (orgName: string) => `Sair de ${orgName}?`,
+    confirmBody:
+      'Você perderá o acesso imediatamente. Para voltar, será necessário receber um novo convite.',
+    confirm: 'Sair da organização',
+    cancel: 'Cancelar',
+    leaving: 'Saindo…',
+    successToast: 'Você saiu da organização',
+    successToastBody: (orgName: string) =>
+      `Você não faz mais parte de ${orgName}.`,
+    announcement: (orgName: string) => `Você saiu de ${orgName}.`,
+    errors: {
+      loneOwner:
+        'Você é a única pessoa proprietária desta organização. Promova outro membro a Dono antes de sair.',
+      generic: 'Não foi possível sair da organização. Tente novamente.',
+    },
+  },
   dangerZone: {
     title: 'Zona de perigo',
     deleteTitle: 'Excluir organização',

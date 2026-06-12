@@ -5,7 +5,9 @@ import { forwardRef, type FormEvent } from 'react';
 import { t } from '@/lib/i18n/t';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { SlugAvailability } from '@/components/ui/SlugAvailability';
 import { SpinnerIcon } from '@/app/_icons/SpinnerIcon';
+import type { SlugCheckStatus } from '@/lib/types/api';
 
 export interface CreateOrgFormErrors {
   name?: string;
@@ -16,6 +18,8 @@ export interface CreateOrgFormProps {
   name: string;
   slug: string;
   errors: CreateOrgFormErrors;
+  /** Status advisory de disponibilidade do slug (useCheckSlug no modal). */
+  slugStatus: SlugCheckStatus;
   isSubmitting: boolean;
   canSubmit: boolean;
   onNameChange: (v: string) => void;
@@ -35,6 +39,7 @@ export const CreateOrgForm = forwardRef<HTMLInputElement, CreateOrgFormProps>(
       name,
       slug,
       errors,
+      slugStatus,
       isSubmitting,
       canSubmit,
       onNameChange,
@@ -115,6 +120,11 @@ export const CreateOrgForm = forwardRef<HTMLInputElement, CreateOrgFormProps>(
               )}
             </p>
           )}
+          {/* Canal paralelo e mais suave que o slot de erro do form: não
+              entra no aria-describedby (live region já alcança SRs) e não
+              seta aria-invalid — o valor é input válido, só (advisoriamente)
+              indisponível (spec 03 §2/§3). */}
+          <SlugAvailability status={slugStatus} />
         </div>
 
         <div className="mt-2 flex flex-col-reverse justify-end gap-2 border-t border-border pt-4 sm:flex-row">
