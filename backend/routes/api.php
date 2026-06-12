@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\AcceptInvitationController;
+use App\Http\Controllers\Api\V1\CheckOrganizationSlugController;
 use App\Http\Controllers\Api\V1\InvitationController;
+use App\Http\Controllers\Api\V1\LeaveOrganizationController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\MembershipController;
 use App\Http\Controllers\Api\V1\OrganizationController;
@@ -120,6 +122,17 @@ Route::prefix('v1')
         Route::post('/organizations', [OrganizationController::class, 'store'])
             ->name('v1.organizations.store');
 
+        // Advisory slug-availability preview for the create-org form.
+        // ORDERING MATTERS: this path has the same segment count as
+        // `/organizations/{organization}`, so it MUST be registered
+        // before that wildcard route or "check-slug" would be captured
+        // as an organization id. The named `check_slug` limiter
+        // (30/min/user, AppServiceProvider) layers on top of the group's
+        // 60/min — same defence-in-depth pattern as `accept_invitation`.
+        Route::get('/organizations/check-slug', CheckOrganizationSlugController::class)
+            ->middleware('throttle:check_slug')
+            ->name('v1.organizations.check-slug');
+
         // Per-organization endpoints. `org.resolve` reads the
         // `{organization}` route parameter and validates the caller's
         // active membership before the controller runs.
@@ -130,6 +143,12 @@ Route::prefix('v1')
                 ->name('v1.organizations.update');
             Route::delete('/organizations/{organization}', [OrganizationController::class, 'destroy'])
                 ->name('v1.organizations.destroy');
+
+            // Self-removal ("leave"). A verb route, mirroring the
+            // `/invitations/{invitation}/resend` precedent, instead of a
+            // magic `me` literal on the `{member}` binding.
+            Route::post('/organizations/{organization}/leave', LeaveOrganizationController::class)
+                ->name('v1.organizations.leave');
 
             Route::get('/organizations/{organization}/members', [MembershipController::class, 'index'])
                 ->name('v1.organizations.members.index');

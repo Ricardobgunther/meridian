@@ -10,6 +10,8 @@ use App\Models\Membership;
 use App\Models\Organization;
 use App\Models\User;
 use DomainException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -28,7 +30,7 @@ class MembershipService
      *
      * The DB unique index `uniq_memberships_org_user` spans ALL rows
      * (including soft-deleted ones), so a naive INSERT after a prior
-     * soft-delete would collide and surface a {@see \Illuminate\Database\QueryException}
+     * soft-delete would collide and surface a {@see QueryException}
      * as HTTP 500. To keep the unique invariant intact and still support
      * the common "removed last week, want them back today" flow, this
      * method disambiguates the three cases atomically:
@@ -40,7 +42,7 @@ class MembershipService
      *   - NO row → insert a new one.
      *
      * @throws DomainException When the user already has an active
-     *                          membership in the organization.
+     *                         membership in the organization.
      */
     public function add(Organization $organization, User $user, MembershipRole $role): Membership
     {
@@ -159,21 +161,75 @@ class MembershipService
     }
 
     /**
+     * The caller removes their OWN membership ("leave organization").
+     *
+     * Deliberately a separate use case from {@see self::remove()}: the
+     * remove() invariants (actor must canManageMembers() AND outrank the
+     * target) exist to stop privilege abuse between members and must not
+     * be relaxed for the self-case — a plain `member` could never pass
+     * them, yet anyone may leave. The only invariant that applies to
+     * self-removal is lone-owner protection.
+     *
+     * The membership row is re-fetched under `lockForUpdate()` (same
+     * locking discipline as {@see self::add()}) so a concurrent role
+     * change or removal of the caller serialises against this leave.
+     * Concurrent leaves by OTHER owners are serialised inside
+     * {@see self::guardLastOwner()}, which locks the remaining owners'
+     * rows before counting them.
+     *
+     * No server-side "active org" pointer exists to clean up: the active
+     * organization is resolved per-request from the `X-Organization-Id`
+     * header / route binding (ADR-009), and the persisted selection
+     * lives client-side. After the soft-delete, `org.resolve` rejects
+     * any further request scoped to this org with 403.
+     *
+     * @throws LoneOwnerException When the caller is the organization's only active owner.
+     * @throws ModelNotFoundException When the caller no longer holds an active membership (vanished mid-session).
+     */
+    public function leave(Organization $organization, User $user): void
+    {
+        DB::transaction(function () use ($organization, $user): void {
+            $membership = Membership::query()
+                ->where('organization_id', $organization->id)
+                ->where('user_id', $user->id)
+                ->whereNull('deleted_at')
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($membership->role === MembershipRole::Owner) {
+                $this->guardLastOwner($membership);
+            }
+
+            $membership->delete();
+        });
+    }
+
+    /**
      * Rejects an operation that would leave `$member`'s organization
      * without any active owner. Counts active owner memberships other
      * than `$member` itself; if none, refuses the operation.
+     *
+     * The other owners' rows are read under `lockForUpdate()` so two
+     * owners leaving (or being demoted/removed) concurrently serialise
+     * against each other: under READ COMMITTED, an unlocked COUNT would
+     * let both transactions see the other's row as still active and
+     * both pass the guard, leaving zero owners. Postgres rejects
+     * `FOR UPDATE` combined with aggregates, hence pluck() over a
+     * query-side COUNT.
      */
     private function guardLastOwner(Membership $member): void
     {
-        $remainingOwners = Membership::query()
+        $remainingOwnerIds = Membership::query()
             ->where('organization_id', $member->organization_id)
             ->where('role', MembershipRole::Owner->value)
             ->where('id', '!=', $member->id)
             ->whereNull('deleted_at')
-            ->count();
+            ->lockForUpdate()
+            ->pluck('id')
+            ->all();
 
-        if ($remainingOwners === 0) {
-            throw new LoneOwnerException();
+        if ($remainingOwnerIds === []) {
+            throw new LoneOwnerException;
         }
     }
 }

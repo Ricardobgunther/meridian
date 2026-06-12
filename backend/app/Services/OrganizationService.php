@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\MembershipRole;
+use App\Http\Requests\Api\V1\StoreOrganizationRequest;
 use App\Models\Membership;
 use App\Models\Organization;
 use App\Models\User;
@@ -45,6 +46,31 @@ class OrganizationService
 
             return $organization->refresh();
         });
+    }
+
+    /**
+     * Whether `$slug` can be claimed by a new organization.
+     *
+     * MUST stay in lockstep with the uniqueness rule of
+     * {@see StoreOrganizationRequest}
+     * (`Rule::unique('organizations', 'slug')->whereNull('deleted_at')`)
+     * — the live preview lies otherwise. The query below mirrors that
+     * rule literally: soft-deleted organizations do NOT hold their slug
+     * (deleting an org frees it up), hence `withTrashed()` +
+     * `whereNull('deleted_at')` instead of relying on the SoftDeletes
+     * global scope, so the equivalence is explicit at the call site.
+     *
+     * Advisory only: callers must still treat the 422 from
+     * `POST /organizations` as the single source of truth (the result
+     * can go stale the moment it is computed).
+     */
+    public function isSlugAvailable(string $slug): bool
+    {
+        return ! Organization::query()
+            ->withTrashed()
+            ->where('slug', $slug)
+            ->whereNull('deleted_at')
+            ->exists();
     }
 
     /**

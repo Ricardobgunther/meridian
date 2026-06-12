@@ -6,6 +6,7 @@ namespace App\Policies;
 
 use App\Models\Organization;
 use App\Models\User;
+use App\Services\MembershipService;
 
 /**
  * Authorization for {@see Organization} actions — ADR-010.
@@ -40,5 +41,17 @@ class OrganizationPolicy
     public function delete(User $user, Organization $organization): bool
     {
         return $user->roleIn($organization->id)?->canDeleteOrganization() === true;
+    }
+
+    /**
+     * Any active member may leave the organization — no rank required;
+     * this is the one self-directed membership action. The lone-owner
+     * invariant is NOT checked here: it lives in
+     * {@see MembershipService::leave()} so it is enforced
+     * under a row lock, uniformly for every call site.
+     */
+    public function leave(User $user, Organization $organization): bool
+    {
+        return $user->belongsToOrganization($organization->id);
     }
 }

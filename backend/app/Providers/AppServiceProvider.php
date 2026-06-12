@@ -43,5 +43,17 @@ class AppServiceProvider extends ServiceProvider
         // POSTs — follow-up R5. Tighter than the 60/min prefix throttle so a
         // signed-in caller cannot hammer the token-consumption endpoints.
         RateLimiter::for('accept_invitation', fn (Request $request) => Limit::perMinute(10)->by($request->ip()));
+
+        // Per-keystroke (debounced) slug availability checks get their
+        // own bucket so a user typing a slug does not also need to fit
+        // inside the general 60/min v1 budget shape. Keyed by IP: Laravel's
+        // middleware priority runs ThrottleRequests BEFORE
+        // VerifySupabaseToken, so `$request->user()` is always null here —
+        // per-user keying would require reordering the global middleware
+        // priority, not worth it for an advisory endpoint. Users behind a
+        // shared NAT split one bucket; acceptable because a 429 degrades
+        // silently on the client. 30/min ≈ one check every 2s sustained:
+        // generous for a 400ms-debounced field.
+        RateLimiter::for('check_slug', fn (Request $request) => Limit::perMinute(30)->by($request->ip()));
     }
 }

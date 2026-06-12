@@ -60,11 +60,13 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions) {
         // Domain rule violations: lone owner cannot be removed/demoted.
         // 422 mirrors validation errors — the request was well-formed
-        // but violated a business invariant.
+        // but violated a business invariant. The machine-readable `code`
+        // lets clients branch (e.g. the leave-org dialog's inline alert)
+        // without string-matching the PT-BR message.
         $exceptions->render(function (LoneOwnerException $e, Request $request) {
             if ($request->expectsJson() || $request->is('api/*')) {
                 return response()->json(
-                    ['error' => $e->getMessage()],
+                    ['error' => $e->getMessage(), 'code' => 'lone_owner'],
                     Response::HTTP_UNPROCESSABLE_ENTITY,
                 );
             }
