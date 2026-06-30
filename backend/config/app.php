@@ -56,6 +56,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Frontend URL
+    |--------------------------------------------------------------------------
+    |
+    | Public origin of the Next.js frontend. Used by server-issued links
+    | (invitation emails, password resets, etc.) so the user lands on the
+    | UI even when the API is reachable on a different host. Falls back
+    | to APP_URL when unset.
+    |
+    */
+
+    'frontend_url' => env('APP_FRONTEND_URL', env('APP_URL', 'http://localhost')),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------
     |

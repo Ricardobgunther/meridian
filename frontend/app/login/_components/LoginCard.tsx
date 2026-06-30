@@ -16,14 +16,19 @@ const GITHUB_BUTTON_CLASSES =
 export interface LoginCardProps {
   /** Código de erro vindo de `?error=` no callback (opcional). */
   initialError?: string;
+  /** Token de convite (`?invite=...`) a propagar para o OAuth. */
+  inviteToken?: string;
 }
 
 /**
  * Wrapper client que orquestra o erro entre os dois `ProviderButton`s.
  * Permite que falhas síncronas de `signInWithOAuth` apareçam na faixa única,
  * sem duplicar banner em cada botão.
+ *
+ * Quando `inviteToken` está presente, os botões propagam o token via
+ * `redirectTo` para que o callback retorne à página de aceite.
  */
-export function LoginCard({ initialError }: LoginCardProps) {
+export function LoginCard({ initialError, inviteToken }: LoginCardProps) {
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
 
   const errorCode = runtimeError ?? initialError ?? null;
@@ -55,6 +60,7 @@ export function LoginCard({ initialError }: LoginCardProps) {
           icon={<GoogleIcon className="h-5 w-5 shrink-0" />}
           className={GOOGLE_BUTTON_CLASSES}
           onError={() => setRuntimeError('oauth_failed')}
+          inviteToken={inviteToken}
         />
         <ProviderButton
           provider="github"
@@ -62,6 +68,7 @@ export function LoginCard({ initialError }: LoginCardProps) {
           icon={<GithubIcon className="h-5 w-5 shrink-0" />}
           className={GITHUB_BUTTON_CLASSES}
           onError={() => setRuntimeError('oauth_failed')}
+          inviteToken={inviteToken}
         />
       </div>
     </section>

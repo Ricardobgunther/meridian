@@ -100,6 +100,9 @@ Route::get('/health', function () {
 □ Features novas funcionando conforme especificação
 □ Features existentes não foram quebradas (smoke test manual)
 □ Logs sem novos erros: tail -f /app/storage/logs/laravel.log
+□ Logs de acesso NÃO vazam o token de convite: o path /invite/* aparece redigido
+  no proxy/APM (a API já usa header X-Invitation-Token) — ver "Observabilidade e
+  Segredos em Logs", R10
 □ Migrations aplicadas corretamente: php artisan migrate:status
 □ Performance aceitável: nenhuma rota > 1s em P99
 ```
@@ -206,6 +209,46 @@ ssh deploy@prod "docker compose logs -f app --tail=50"
 
 ---
 
+## Filas e Queue Worker
+
+Alguns fluxos despacham trabalho assíncrono — notadamente o **email de convite**,
+que é enfileirado e despachado **after-commit** (`InvitationMail` é `ShouldQueue`,
+follow-up R11). O job só vira email se um **worker estiver rodando**; sem worker, a
+linha fica parada na tabela `jobs` e o convidado nunca recebe o link.
+
+### Requisito (inegociável em produção)
+Manter ao menos um `php artisan queue:work` como **processo supervisionado**
+(supervisor/systemd/container dedicado) — não um one-shot. O passo 6 do deploy
+(`php artisan queue:restart`) apenas sinaliza os workers existentes para
+reiniciarem e pegarem o código novo; ele **não cria** um worker.
+
+```bash
+# Exemplo de programa supervisor (produção)
+# [program:projeto1-queue]
+# command=php /app/artisan queue:work --tries=3 --max-time=3600 --sleep=3
+# autostart=true   autorestart=true   numprocs=1
+# stopwaitsecs=3600   # deixa o job em andamento terminar no deploy
+```
+
+- **Local:** `composer dev` (em `backend/`) já roda `php artisan queue:listen`
+  junto com server/vite/logs — nenhum setup extra.
+- **`QUEUE_CONNECTION`:** `database` por padrão (tabela `jobs`); a stack prevê
+  Redis em produção. O worker é o mesmo comando em qualquer driver.
+- **Falhas:** jobs que esgotam `--tries` caem em `failed_jobs`. Monitorar e
+  reprocessar com `php artisan queue:retry`. O payload do `InvitationMail` é
+  **encriptado** em repouso (`ShouldBeEncrypted`), então o token raw não fica em
+  claro nessa tabela.
+
+### Verificação pós-deploy
+```bash
+# Worker vivo e consumindo?
+ssh deploy@prod "docker compose exec app php artisan queue:monitor default"
+# Jobs falhados acumulando?
+ssh deploy@prod "docker compose exec app php artisan queue:failed"
+```
+
+---
+
 ## Rollback
 
 ### Quando Fazer Rollback
@@ -256,6 +299,88 @@ return app(LegacyPdfEngine::class)->generate($invoice);
 // Para desabilitar em produção sem deploy:
 // Mudar variável de ambiente e reiniciar containers
 ```
+
+---
+
+## Observabilidade e Segredos em Logs (R10)
+
+> **Inegociável em produção.** O token de convite trafega **no path da URL** e
+> **é a credencial** — quem tem o token raw aceita o convite. Diferente de um
+> `Authorization: Bearer`, um path-param é capturado por padrão em praticamente
+> todo log de acesso e ferramenta de APM.
+>
+> **Estado atual (R10 longo prazo ✅):** a **API** já não carrega o token no path —
+> os endpoints `GET|POST /api/v1/invitations/accept` e `.../accept/decline` leem o
+> token do header `X-Invitation-Token` (rotas estáticas). Logo o backend/API **não
+> vaza mais** o token via path. **Resta uma superfície:** a página do frontend
+> `/invite/{token}` (Next.js), cujo path É o link que o usuário clica — essa não dá
+> para tirar do path, então é coberta por redação de log + `Referrer-Policy`.
+>
+> **Aplique a redação em TODO proxy/gateway no caminho do frontend** (edge do
+> Next, CDN/WAF/API gateway na frente — Cloudflare, etc.). A perna SSR agora chama
+> a API com o token no header, então o upstream do backend não precisa mais de
+> redação por esse motivo.
+
+### Onde o token vaza
+| Camada | Como vaza | Mitigação |
+|--------|-----------|-----------|
+| API backend (`/api/v1/invitations/accept*`) | — | ✅ **resolvido**: token no header `X-Invitation-Token`, fora do path (R10 longo prazo) |
+| Nginx / proxy / CDN / WAF do **frontend** | `$request_uri` de `/invite/<token>` no `access_log` | redigir o segmento do token (map abaixo) em todos os proxies do caminho do frontend |
+| Next.js runtime | logs de acesso/SSR que registram a URL `/invite/<token>` | redigir/excluir os paths `/invite/*` |
+| **`Referer` header** | a página `/invite/<token>` carrega no browser com o token no path; qualquer recurso de origem externa (analytics, fonte, pixel) ou link clicado recebe `/invite/<token>` no `Referer` → vaza para terceiros e logs deles | ✅ **já mitigado**: `Referrer-Policy: no-referrer` em `/invite/*` via `frontend/next.config.mjs` (testado em `next.config.test.ts`) |
+| APM / observabilidade (Sentry, Datadog, etc.) | captura da URL `/invite/<token>` em traces/breadcrumbs | regra de scrubbing por prefixo de path |
+| `laravel.log` | **não** loga o path por padrão — só vaza se você logar `$request->fullUrl()` | nunca logar a URL completa de rotas accept-by-token |
+
+> ⚠️ A redação cobre o **path** do `/invite/*`. Não reintroduza o vazamento por
+> outra via: `$http_authorization` (Bearer) e `$http_x_invitation_token` (o token
+> de convite!) **nunca** devem entrar num `log_format`. `$http_referer` só é seguro
+> porque enforçamos `Referrer-Policy: no-referrer` em `/invite/*` (ver linha da
+> tabela); sem essa policy, ele volta a logar o token.
+
+### Redação no Nginx (recomendado — preserva o resto da linha de log)
+```nginx
+# Redige o token na página /invite/<token> (a API já não tem token no path).
+# Use $loggable_uri no lugar de $request no log_format.
+map $request_uri $loggable_uri {
+    ~^(?<p>/invite/)[^/?]+(?<s>.*)$  "${p}[REDACTED]${s}";
+    default                          $request_uri;
+}
+
+log_format redacted '$remote_addr - $remote_user [$time_local] '
+                    '"$request_method $loggable_uri $server_protocol" '
+                    '$status $body_bytes_sent "$http_referer" "$http_user_agent"';
+
+access_log /var/log/nginx/access.log redacted;
+```
+
+Alternativa mais simples (perde a linha inteira desse path):
+```nginx
+location ~ ^/invite/ {
+    access_log off;
+    # ... proxy_pass etc.
+}
+```
+> Trade-off: `access_log off` **cega a detecção de abuso** desses endpoints —
+> o GET público de preview tem `throttle:60,1` e você perde a trilha para
+> investigar brute-force/enumeração. Prefira o `map` (redige o token, mantém a
+> linha) sempre que possível.
+
+> O `log_format redacted` acima mantém `$http_referer` por ser útil em analytics;
+> isso só é seguro porque enforçamos `Referrer-Policy: no-referrer` em `/invite/*`
+> (já implementado em `frontend/next.config.mjs`), que impede o browser de enviar
+> `/invite/<token>` no Referer. Se remover essa policy, tire `$http_referer` do
+> formato. **Nunca** inclua `$http_authorization` em log_format algum.
+
+### APM / observabilidade
+Configurar **URL scrubbing** para mascarar o segmento após `/accept/` e `/invite/`
+antes do envio. Exemplo conceitual (Sentry `beforeSend`): reescrever
+`event.request.url` aplicando a mesma regex de redação acima.
+
+### Solução durável (R10 longo prazo — fora deste escopo)
+Mover o token do path para um header (`X-Invitation-Token`). Headers não entram
+em access logs por padrão, eliminando a classe inteira de vazamento. É **mudança
+contratual** (backend + frontend) e está rastreada separadamente; enquanto não
+acontece, a redação acima é a defesa obrigatória.
 
 ---
 
